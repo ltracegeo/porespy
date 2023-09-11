@@ -1,7 +1,7 @@
 
 <!DOCTYPE html>
 
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -25,8 +25,8 @@
 
     <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="../../../_static/copybutton.css" />
-    <link rel="stylesheet" type="text/css" href="../../../_static/panels-main.c949a650a448cc0ae9fd3441c0e17fb0.css" />
-    <link rel="stylesheet" type="text/css" href="../../../_static/panels-variables.06eb56fa6e07937060861dad626602ad.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/mystnb.4510f1fc1dee50b3e5859aac5469c37c29e427902b24a333a5f9fcb2f0b3ac41.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/design-style.1e8bd061cd6da7fc9cf755528e8ffc24.min.css" />
     <link rel="stylesheet" type="text/css" href="../../../_static/css/custom.css" />
 
   <!-- Pre-loaded scripts that we'll load fully later -->
@@ -35,16 +35,17 @@
     <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
     <script src="../../../_static/jquery.js"></script>
     <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/_sphinx_javascript_frameworks_compat.js"></script>
     <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/sphinx_highlight.js"></script>
     <script src="../../../_static/clipboard.min.js"></script>
     <script src="../../../_static/copybutton.js"></script>
-    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
-    <script src="https://unpkg.com/@jupyter-widgets/html-manager@^0.20.1/dist/embed-amd.js"></script>
+    <script src="../../../_static/design-tabs.js"></script>
     <script src="../../../_static/js/custom.js"></script>
     <link rel="index" title="Index" href="../../../genindex.html" />
     <link rel="search" title="Search" href="../../../search.html" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="docsearch:language" content="None">
+<meta name="docsearch:language" content="en">
   </head>
   
   
@@ -87,8 +88,14 @@
       <div class="navbar-center-item">
         <ul id="navbar-main-elements" class="navbar-nav">
     <li class="toctree-l1 nav-item">
- <a class="reference internal nav-link" href="../../../user_guide/index.html">
-  User Guide
+ <a class="reference internal nav-link" href="../../../installation.html">
+  Installation
+ </a>
+</li>
+
+<li class="toctree-l1 nav-item">
+ <a class="reference internal nav-link" href="../../../basic_usage.html">
+  Basic Usage
  </a>
 </li>
 
@@ -99,7 +106,7 @@
 </li>
 
 <li class="toctree-l1 nav-item">
- <a class="reference internal nav-link" href="../../../examples.html">
+ <a class="reference internal nav-link" href="../../../_examples/index.html">
   Examples
  </a>
 </li>
@@ -182,14 +189,17 @@
               <article class="bd-article" role="main">
                 
   <h1>Source code for porespy.tools._utils</h1><div class="highlight"><pre>
-<span></span><span class="kn">import</span> <span class="nn">os</span>
+<span></span><span class="kn">import</span> <span class="nn">logging</span>
 <span class="kn">import</span> <span class="nn">sys</span>
 <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
 <span class="kn">import</span> <span class="nn">importlib</span>
 <span class="kn">from</span> <span class="nn">dataclasses</span> <span class="kn">import</span> <span class="n">dataclass</span>
-<span class="kn">from</span> <span class="nn">loguru</span> <span class="kn">import</span> <span class="n">logger</span>
-<span class="kn">from</span> <span class="nn">tqdm</span> <span class="kn">import</span> <span class="n">tqdm</span>
 <span class="kn">import</span> <span class="nn">psutil</span>
+<span class="kn">import</span> <span class="nn">inspect</span>
+<span class="kn">import</span> <span class="nn">time</span>
+
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s2">&quot;porespy&quot;</span><span class="p">)</span>
 
 
 <span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
@@ -197,7 +207,86 @@
     <span class="s1">&#39;get_tqdm&#39;</span><span class="p">,</span>
     <span class="s1">&#39;show_docstring&#39;</span><span class="p">,</span>
     <span class="s1">&#39;Results&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;tic&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;toc&#39;</span><span class="p">,</span>
 <span class="p">]</span>
+
+
+<span class="k">def</span> <span class="nf">_format_time</span><span class="p">(</span><span class="n">timespan</span><span class="p">,</span> <span class="n">precision</span><span class="o">=</span><span class="mi">3</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Formats the timespan in a human readable form&quot;&quot;&quot;</span>
+
+    <span class="k">if</span> <span class="n">timespan</span> <span class="o">&gt;=</span> <span class="mf">60.0</span><span class="p">:</span>
+        <span class="c1"># we have more than a minute, format that in a human readable form</span>
+        <span class="c1"># Idea from http://snipplr.com/view/5713/</span>
+        <span class="n">parts</span> <span class="o">=</span> <span class="p">[(</span><span class="s2">&quot;d&quot;</span><span class="p">,</span> <span class="mi">60</span><span class="o">*</span><span class="mi">60</span><span class="o">*</span><span class="mi">24</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;h&quot;</span><span class="p">,</span> <span class="mi">60</span><span class="o">*</span><span class="mi">60</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;min&quot;</span><span class="p">,</span> <span class="mi">60</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;s&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)]</span>
+        <span class="n">time</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">leftover</span> <span class="o">=</span> <span class="n">timespan</span>
+        <span class="k">for</span> <span class="n">suffix</span><span class="p">,</span> <span class="n">length</span> <span class="ow">in</span> <span class="n">parts</span><span class="p">:</span>
+            <span class="n">value</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">leftover</span> <span class="o">/</span> <span class="n">length</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">value</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">leftover</span> <span class="o">=</span> <span class="n">leftover</span> <span class="o">%</span> <span class="n">length</span>
+                <span class="n">time</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">u</span><span class="s1">&#39;</span><span class="si">%s%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">suffix</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">leftover</span> <span class="o">&lt;</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="k">break</span>
+        <span class="k">return</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">time</span><span class="p">)</span>
+
+    <span class="c1"># Unfortunately the unicode &#39;micro&#39; symbol can cause problems in</span>
+    <span class="c1"># certain terminals.</span>
+    <span class="c1"># See bug: https://bugs.launchpad.net/ipython/+bug/348466</span>
+    <span class="c1"># Try to prevent crashes by being more secure than it needs to</span>
+    <span class="c1"># E.g. eclipse is able to print a µ, but has no sys.stdout.encoding set.</span>
+    <span class="n">units</span> <span class="o">=</span> <span class="p">[</span><span class="sa">u</span><span class="s2">&quot;s&quot;</span><span class="p">,</span> <span class="sa">u</span><span class="s2">&quot;ms&quot;</span><span class="p">,</span> <span class="sa">u</span><span class="s1">&#39;us&#39;</span><span class="p">,</span> <span class="s2">&quot;ns&quot;</span><span class="p">]</span>  <span class="c1"># the save value</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="p">,</span> <span class="s1">&#39;encoding&#39;</span><span class="p">)</span> <span class="ow">and</span> <span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="o">.</span><span class="n">encoding</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="sa">u</span><span class="s1">&#39;</span><span class="se">\xb5</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="o">.</span><span class="n">encoding</span><span class="p">)</span>
+            <span class="n">units</span> <span class="o">=</span> <span class="p">[</span><span class="sa">u</span><span class="s2">&quot;s&quot;</span><span class="p">,</span> <span class="sa">u</span><span class="s2">&quot;ms&quot;</span><span class="p">,</span> <span class="sa">u</span><span class="s1">&#39;</span><span class="se">\xb5</span><span class="s1">s&#39;</span><span class="p">,</span> <span class="s2">&quot;ns&quot;</span><span class="p">]</span>
+        <span class="k">except</span> <span class="ne">UnicodeEncodeError</span><span class="p">:</span>
+            <span class="k">pass</span>
+    <span class="n">scaling</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mf">1e3</span><span class="p">,</span> <span class="mf">1e6</span><span class="p">,</span> <span class="mf">1e9</span><span class="p">]</span>
+
+    <span class="k">if</span> <span class="n">timespan</span> <span class="o">&gt;</span> <span class="mf">0.0</span><span class="p">:</span>
+        <span class="n">order</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="o">-</span><span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">floor</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">log10</span><span class="p">(</span><span class="n">timespan</span><span class="p">))</span> <span class="o">//</span> <span class="mi">3</span><span class="p">),</span> <span class="mi">3</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">order</span> <span class="o">=</span> <span class="mi">3</span>
+    <span class="k">return</span> <span class="sa">u</span><span class="s2">&quot;</span><span class="si">%.*g</span><span class="s2"> </span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">precision</span><span class="p">,</span> <span class="n">timespan</span> <span class="o">*</span> <span class="n">scaling</span><span class="p">[</span><span class="n">order</span><span class="p">],</span> <span class="n">units</span><span class="p">[</span><span class="n">order</span><span class="p">])</span>
+
+
+<span class="k">def</span> <span class="nf">tic</span><span class="p">():</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Homemade version of matlab tic and toc function, tic starts or resets</span>
+<span class="sd">    the clock, toc reports the time since the last call of tic.</span>
+
+<span class="sd">    See Also</span>
+<span class="sd">    --------</span>
+<span class="sd">    toc</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">global</span> <span class="n">_startTime_for_tictoc</span>
+    <span class="n">_startTime_for_tictoc</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+
+
+<span class="k">def</span> <span class="nf">toc</span><span class="p">(</span><span class="n">quiet</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Homemade version of matlab tic and toc function, tic starts or resets</span>
+<span class="sd">    the clock, toc reports the time since the last call of tic.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    quiet : bool, default is False</span>
+<span class="sd">        If False then a message is output to the console. If</span>
+<span class="sd">        True the message is not displayed and the elapsed time is returned.</span>
+
+<span class="sd">    See Also</span>
+<span class="sd">    --------</span>
+<span class="sd">    tic</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="s2">&quot;_startTime_for_tictoc&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="nb">globals</span><span class="p">():</span>
+        <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;Start time not set, call tic first&quot;</span><span class="p">)</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">_startTime_for_tictoc</span>
+    <span class="k">if</span> <span class="n">quiet</span> <span class="ow">is</span> <span class="kc">False</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Elapsed time: </span><span class="si">{</span><span class="n">_format_time</span><span class="p">(</span><span class="n">t</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">t</span>
 
 
 <span class="k">def</span> <span class="nf">_is_ipython_notebook</span><span class="p">():</span>  <span class="c1"># pragma: no cover</span>
@@ -212,33 +301,9 @@
         <span class="k">return</span> <span class="kc">False</span>        <span class="c1"># Probably standard Python interpreter</span>
 
 
-<span class="k">def</span> <span class="nf">config_logger</span><span class="p">(</span><span class="n">fmt</span><span class="p">,</span> <span class="n">loglevel</span><span class="p">):</span>  <span class="c1"># pragma: no cover</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">    Configures loguru logger with the given format and log level.</span>
-
-<span class="sd">    Parameters</span>
-<span class="sd">    ----------</span>
-<span class="sd">    fmt : str</span>
-<span class="sd">        loguru-compatible format used to format logger messages.</span>
-<span class="sd">    loglevel : str</span>
-<span class="sd">        Determines what messages to get printed in console. Options are:</span>
-<span class="sd">        &quot;TRACE&quot;, &quot;DEBUG&quot;, &quot;INFO&quot;, &quot;SUCCESS&quot;, &quot;WARNING&quot;, &quot;ERROR&quot;, &quot;CRITICAL&quot;</span>
-
-<span class="sd">    Returns</span>
-<span class="sd">    -------</span>
-<span class="sd">    None.</span>
-
-<span class="sd">    &quot;&quot;&quot;</span>
-    <span class="n">logger</span><span class="o">.</span><span class="n">remove</span><span class="p">()</span>
-    <span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="k">lambda</span> <span class="n">msg</span><span class="p">:</span> <span class="n">tqdm</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">msg</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">),</span>
-               <span class="n">level</span><span class="o">=</span><span class="n">loglevel</span><span class="p">,</span>
-               <span class="nb">format</span><span class="o">=</span><span class="n">fmt</span><span class="p">,</span>
-               <span class="n">colorize</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-
-
 <span class="nd">@dataclass</span>
 <span class="k">class</span> <span class="nc">Settings</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    A dataclass for use at the module level to store settings.  This class</span>
 <span class="sd">    is defined as a Singleton so now matter how or where it gets</span>
 <span class="sd">    instantiated the same object is returned, containing all existing</span>
@@ -260,8 +325,6 @@
 <span class="sd">        ``True`` will silence the progress bars.  It&#39;s also possible to</span>
 <span class="sd">        adjust the formatting such as ``&#39;colour&#39;`` and ``&#39;ncols&#39;``, which</span>
 <span class="sd">        controls width.</span>
-<span class="sd">    logger_fmt : str</span>
-<span class="sd">        luguru-compatible format used to format the logger messages.</span>
 <span class="sd">    loglevel : str, or int</span>
 <span class="sd">        Determines what messages to get printed in console. Options are:</span>
 <span class="sd">        &quot;TRACE&quot; (5), &quot;DEBUG&quot; (10), &quot;INFO&quot; (20), &quot;SUCCESS&quot; (25), &quot;WARNING&quot; (30),</span>
@@ -275,45 +338,32 @@
             <span class="s1">&#39;ncols&#39;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
             <span class="s1">&#39;leave&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
             <span class="s1">&#39;file&#39;</span><span class="p">:</span> <span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="p">}</span>
-    <span class="n">_logger_fmt</span> <span class="o">=</span> <span class="s1">&#39;&lt;green&gt;{time:YYYY-MM-DD HH:mm:ss}&lt;/green&gt; | &#39;</span> \
-          <span class="s1">&#39;&lt;level&gt;</span><span class="si">{level: &lt;8}</span><span class="s1">&lt;/level&gt; | &#39;</span> \
-          <span class="s1">&#39;&lt;cyan&gt;</span><span class="si">{name}</span><span class="s1">&lt;/cyan&gt;:&lt;cyan&gt;</span><span class="si">{function}</span><span class="s1">&lt;/cyan&gt;:&lt;cyan&gt;</span><span class="si">{line}</span><span class="s1">&lt;/cyan&gt;&#39;</span> \
-          <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">--&gt; &lt;level&gt;</span><span class="si">{message}</span><span class="s1">&lt;/level&gt;&#39;</span>
-    <span class="n">_loglevel</span> <span class="o">=</span> <span class="s2">&quot;ERROR&quot;</span> <span class="k">if</span> <span class="n">_is_ipython_notebook</span><span class="p">()</span> <span class="k">else</span> <span class="s2">&quot;WARNING&quot;</span>
-    <span class="n">config_logger</span><span class="p">(</span><span class="n">_logger_fmt</span><span class="p">,</span> <span class="n">_loglevel</span><span class="p">)</span>
+    <span class="n">_loglevel</span> <span class="o">=</span> <span class="mi">40</span> <span class="k">if</span> <span class="n">_is_ipython_notebook</span><span class="p">()</span> <span class="k">else</span> <span class="mi">30</span>
 
     <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
         <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_notebook</span> <span class="o">=</span> <span class="kc">None</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_ncores</span> <span class="o">=</span> <span class="n">psutil</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()</span>
-
-    <span class="nd">@property</span>
-    <span class="k">def</span> <span class="nf">logger_fmt</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_logger_fmt</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ncores</span> <span class="o">=</span> <span class="n">psutil</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">(</span><span class="n">logical</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 
     <span class="nd">@property</span>
     <span class="k">def</span> <span class="nf">loglevel</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_loglevel</span>
 
-    <span class="nd">@logger_fmt</span><span class="o">.</span><span class="n">setter</span>
-    <span class="k">def</span> <span class="nf">logger_fmt</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">_logger_fmt</span> <span class="o">=</span> <span class="n">value</span>
-        <span class="n">config_logger</span><span class="p">(</span><span class="n">fmt</span><span class="o">=</span><span class="n">value</span><span class="p">,</span> <span class="n">loglevel</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">loglevel</span><span class="p">)</span>
-
     <span class="nd">@loglevel</span><span class="o">.</span><span class="n">setter</span>
     <span class="k">def</span> <span class="nf">loglevel</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
-        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-            <span class="n">options</span> <span class="o">=</span> <span class="p">{</span><span class="mi">5</span><span class="p">:</span> <span class="s2">&quot;TRACE&quot;</span><span class="p">,</span>
-                       <span class="mi">10</span><span class="p">:</span> <span class="s2">&quot;DEBUG&quot;</span><span class="p">,</span>
-                       <span class="mi">20</span><span class="p">:</span> <span class="s2">&quot;INFO&quot;</span><span class="p">,</span>
-                       <span class="mi">25</span><span class="p">:</span> <span class="s2">&quot;SUCESS&quot;</span><span class="p">,</span>
-                       <span class="mi">30</span><span class="p">:</span> <span class="s2">&quot;WARNING&quot;</span><span class="p">,</span>
-                       <span class="mi">40</span><span class="p">:</span> <span class="s2">&quot;ERROR&quot;</span><span class="p">,</span>
-                       <span class="mi">50</span><span class="p">:</span> <span class="s2">&quot;CRITICAL&quot;</span><span class="p">}</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+            <span class="n">options</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s2">&quot;TRACE&quot;</span> <span class="p">:</span> <span class="mi">5</span><span class="p">,</span>
+                <span class="s2">&quot;DEBUG&quot;</span> <span class="p">:</span> <span class="mi">10</span><span class="p">,</span>
+                <span class="s2">&quot;INFO&quot;</span> <span class="p">:</span> <span class="mi">20</span><span class="p">,</span>
+                <span class="s2">&quot;SUCESS&quot;</span> <span class="p">:</span> <span class="mi">25</span><span class="p">,</span>
+                <span class="s2">&quot;WARNING&quot;</span> <span class="p">:</span> <span class="mi">30</span><span class="p">,</span>
+                <span class="s2">&quot;ERROR&quot;</span> <span class="p">:</span> <span class="mi">40</span><span class="p">,</span>
+                <span class="s2">&quot;CRITICAL&quot;</span> <span class="p">:</span> <span class="mi">50</span>
+            <span class="p">}</span>
             <span class="n">value</span> <span class="o">=</span> <span class="n">options</span><span class="p">[</span><span class="n">value</span><span class="p">]</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_loglevel</span> <span class="o">=</span> <span class="n">value</span>
-        <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;LOGURU_LEVEL&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
-        <span class="n">config_logger</span><span class="p">(</span><span class="n">fmt</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">logger_fmt</span><span class="p">,</span> <span class="n">loglevel</span><span class="o">=</span><span class="n">value</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
 
     <span class="k">def</span> <span class="fm">__new__</span><span class="p">(</span><span class="bp">cls</span><span class="p">):</span>
         <span class="k">if</span> <span class="n">Settings</span><span class="o">.</span><span class="n">__instance__</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
@@ -338,15 +388,16 @@
 
     <span class="k">def</span> <span class="nf">_get_ncores</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ncores</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">_ncores</span> <span class="o">=</span> <span class="n">psutil</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_ncores</span> <span class="o">=</span> <span class="n">psutil</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">(</span><span class="n">logical</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ncores</span>
 
     <span class="k">def</span> <span class="nf">_set_ncores</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">val</span><span class="p">):</span>
+        <span class="n">cpu_count</span> <span class="o">=</span> <span class="n">psutil</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">(</span><span class="n">logical</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
         <span class="k">if</span> <span class="n">val</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="n">val</span> <span class="o">=</span> <span class="n">psutil</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()</span>
-        <span class="k">elif</span> <span class="n">val</span> <span class="o">&gt;</span> <span class="n">psutil</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">():</span>
+            <span class="n">val</span> <span class="o">=</span> <span class="n">cpu_count</span>
+        <span class="k">elif</span> <span class="n">val</span> <span class="o">&gt;</span> <span class="n">cpu_count</span><span class="p">:</span>
             <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;Value is more than the available number of cores&#39;</span><span class="p">)</span>
-            <span class="n">val</span> <span class="o">=</span> <span class="n">psutil</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()</span>
+            <span class="n">val</span> <span class="o">=</span> <span class="n">cpu_count</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_ncores</span> <span class="o">=</span> <span class="n">val</span>
 
     <span class="n">ncores</span> <span class="o">=</span> <span class="nb">property</span><span class="p">(</span><span class="n">fget</span><span class="o">=</span><span class="n">_get_ncores</span><span class="p">,</span> <span class="n">fset</span><span class="o">=</span><span class="n">_set_ncores</span><span class="p">)</span>
@@ -362,8 +413,8 @@
     <span class="n">notebook</span> <span class="o">=</span> <span class="nb">property</span><span class="p">(</span><span class="n">fget</span><span class="o">=</span><span class="n">_get_notebook</span><span class="p">,</span> <span class="n">fset</span><span class="o">=</span><span class="n">_set_notebook</span><span class="p">)</span>
 
 
-<div class="viewcode-block" id="get_tqdm"><a class="viewcode-back" href="../../../modules/generated/porespy.tools.get_tqdm.html#porespy.tools.get_tqdm">[docs]</a><span class="k">def</span> <span class="nf">get_tqdm</span><span class="p">():</span>  <span class="c1"># pragma: no cover</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="get_tqdm"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.tools.get_tqdm.html#porespy.tools.get_tqdm">[docs]</a><span class="k">def</span> <span class="nf">get_tqdm</span><span class="p">():</span>  <span class="c1"># pragma: no cover</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Fetches a version of ``tqdm`` function that depends on the environment.</span>
 
 <span class="sd">    Either text-based for the IPython console or gui-based for Jupyter</span>
@@ -382,8 +433,8 @@
     <span class="k">return</span> <span class="n">tqdm</span><span class="o">.</span><span class="n">tqdm</span></div>
 
 
-<div class="viewcode-block" id="show_docstring"><a class="viewcode-back" href="../../../modules/generated/porespy.tools.show_docstring.html#porespy.tools.show_docstring">[docs]</a><span class="k">def</span> <span class="nf">show_docstring</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>  <span class="c1"># pragma: no cover</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="show_docstring"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.tools.show_docstring.html#porespy.tools.show_docstring">[docs]</a><span class="k">def</span> <span class="nf">show_docstring</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>  <span class="c1"># pragma: no cover</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Fetches the docstring for a function and returns it in markdown format.</span>
 
 <span class="sd">    Useful for printing in a Jupyter notebook.</span>
@@ -410,8 +461,8 @@
     <span class="k">return</span> <span class="n">title</span> <span class="o">+</span> <span class="n">txt</span> <span class="o">+</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">---&#39;</span></div>
 
 
-<div class="viewcode-block" id="sanitize_filename"><a class="viewcode-back" href="../../../modules/generated/porespy.tools.sanitize_filename.html#porespy.tools.sanitize_filename">[docs]</a><span class="k">def</span> <span class="nf">sanitize_filename</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">ext</span><span class="p">,</span> <span class="n">exclude_ext</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="sanitize_filename"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.tools.sanitize_filename.html#porespy.tools.sanitize_filename">[docs]</a><span class="k">def</span> <span class="nf">sanitize_filename</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">ext</span><span class="p">,</span> <span class="n">exclude_ext</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Returns a sanitized string in the form of name.extension</span>
 
 <span class="sd">    Parameters</span>
@@ -440,8 +491,8 @@
     <span class="k">return</span> <span class="n">filename_formatted</span></div>
 
 
-<div class="viewcode-block" id="Results"><a class="viewcode-back" href="../../../modules/generated/porespy.tools.Results.html#porespy.tools.Results">[docs]</a><span class="k">class</span> <span class="nc">Results</span><span class="p">:</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="Results"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.tools.Results.html#porespy.tools.Results">[docs]</a><span class="k">class</span> <span class="nc">Results</span><span class="p">:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    A minimal class for use when returning multiple values from a function</span>
 
 <span class="sd">    This class supports dict-like assignment and retrieval</span>
@@ -449,12 +500,15 @@
 <span class="sd">    and generic class-like object assignment (``obj.im = im``)</span>
 
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="n">_value</span> <span class="o">=</span> <span class="s2">&quot;Description&quot;</span>
-    <span class="n">_key</span> <span class="o">=</span> <span class="s2">&quot;Item&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_func</span> <span class="o">=</span> <span class="n">inspect</span><span class="o">.</span><span class="n">getouterframes</span><span class="p">(</span><span class="n">inspect</span><span class="o">.</span><span class="n">currentframe</span><span class="p">())[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">function</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">asctime</span><span class="p">()</span>
 
     <span class="k">def</span> <span class="fm">__iter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__dict__</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
-            <span class="k">yield</span> <span class="n">item</span>
+        <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__dict__</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">k</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">):</span>
+                <span class="k">yield</span> <span class="n">v</span>
 
     <span class="k">def</span> <span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
         <span class="k">return</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span>
@@ -464,16 +518,20 @@
 
     <span class="k">def</span> <span class="fm">__str__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
         <span class="n">header</span> <span class="o">=</span> <span class="s2">&quot;―&quot;</span> <span class="o">*</span> <span class="mi">78</span>
-        <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="n">header</span><span class="p">,</span> <span class="s2">&quot;</span><span class="si">{0:&lt;25s}</span><span class="s2"> </span><span class="si">{1}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_key</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_value</span><span class="p">),</span> <span class="n">header</span><span class="p">]</span>
+        <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">header</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;Results of </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_func</span><span class="si">}</span><span class="s2"> generated at </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_time</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="n">header</span><span class="p">,</span>
+        <span class="p">]</span>
         <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="vm">__dict__</span><span class="o">.</span><span class="n">keys</span><span class="p">()):</span>
             <span class="k">if</span> <span class="n">item</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">):</span>
                 <span class="k">continue</span>
             <span class="k">if</span> <span class="p">(</span><span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="p">[</span><span class="n">item</span><span class="p">],</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)):</span>
                 <span class="n">s</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">shape</span><span class="p">(</span><span class="bp">self</span><span class="p">[</span><span class="n">item</span><span class="p">])</span>
-                <span class="k">if</span> <span class="p">(</span><span class="bp">self</span><span class="p">[</span><span class="n">item</span><span class="p">]</span><span class="o">.</span><span class="n">ndim</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">):</span>
-                    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">{0:&lt;25s}</span><span class="s2"> Image of size </span><span class="si">{1}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">item</span><span class="p">,</span> <span class="n">s</span><span class="p">))</span>
-                <span class="k">else</span><span class="p">:</span>
-                    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">{0:&lt;25s}</span><span class="s2"> Array of size </span><span class="si">{1}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">item</span><span class="p">,</span> <span class="n">s</span><span class="p">))</span>
+                <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">{0:&lt;25s}</span><span class="s2"> Array of size </span><span class="si">{1}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">item</span><span class="p">,</span> <span class="n">s</span><span class="p">))</span>
+            <span class="k">elif</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="p">[</span><span class="n">item</span><span class="p">],</span> <span class="s1">&#39;keys&#39;</span><span class="p">):</span>
+                <span class="n">N</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">[</span><span class="n">item</span><span class="p">]</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+                <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">{0:&lt;25s}</span><span class="s2"> Dictionary with </span><span class="si">{1}</span><span class="s2"> items&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">item</span><span class="p">,</span> <span class="n">N</span><span class="p">))</span>
             <span class="k">else</span><span class="p">:</span>
                 <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">{0:&lt;25s}</span><span class="s2"> </span><span class="si">{1}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">item</span><span class="p">,</span> <span class="bp">self</span><span class="p">[</span><span class="n">item</span><span class="p">]))</span>
         <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">header</span><span class="p">)</span>
@@ -498,13 +556,13 @@
   
   <div class="footer-item">
     <p class="copyright">
-    &copy; Copyright 2022, PMEAL.<br>
+    &copy; Copyright 2023, PMEAL.<br>
 </p>
   </div>
   
   <div class="footer-item">
     <p class="sphinx-version">
-Created using <a href="http://sphinx-doc.org/">Sphinx</a> 4.5.0.<br>
+Created using <a href="http://sphinx-doc.org/">Sphinx</a> 5.3.0.<br>
 </p>
   </div>
   

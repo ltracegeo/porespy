@@ -1,7 +1,7 @@
 
 <!DOCTYPE html>
 
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -25,8 +25,8 @@
 
     <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="../../../_static/copybutton.css" />
-    <link rel="stylesheet" type="text/css" href="../../../_static/panels-main.c949a650a448cc0ae9fd3441c0e17fb0.css" />
-    <link rel="stylesheet" type="text/css" href="../../../_static/panels-variables.06eb56fa6e07937060861dad626602ad.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/mystnb.4510f1fc1dee50b3e5859aac5469c37c29e427902b24a333a5f9fcb2f0b3ac41.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/design-style.1e8bd061cd6da7fc9cf755528e8ffc24.min.css" />
     <link rel="stylesheet" type="text/css" href="../../../_static/css/custom.css" />
 
   <!-- Pre-loaded scripts that we'll load fully later -->
@@ -35,16 +35,17 @@
     <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
     <script src="../../../_static/jquery.js"></script>
     <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/_sphinx_javascript_frameworks_compat.js"></script>
     <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/sphinx_highlight.js"></script>
     <script src="../../../_static/clipboard.min.js"></script>
     <script src="../../../_static/copybutton.js"></script>
-    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
-    <script src="https://unpkg.com/@jupyter-widgets/html-manager@^0.20.1/dist/embed-amd.js"></script>
+    <script src="../../../_static/design-tabs.js"></script>
     <script src="../../../_static/js/custom.js"></script>
     <link rel="index" title="Index" href="../../../genindex.html" />
     <link rel="search" title="Search" href="../../../search.html" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="docsearch:language" content="None">
+<meta name="docsearch:language" content="en">
   </head>
   
   
@@ -87,8 +88,14 @@
       <div class="navbar-center-item">
         <ul id="navbar-main-elements" class="navbar-nav">
     <li class="toctree-l1 nav-item">
- <a class="reference internal nav-link" href="../../../user_guide/index.html">
-  User Guide
+ <a class="reference internal nav-link" href="../../../installation.html">
+  Installation
+ </a>
+</li>
+
+<li class="toctree-l1 nav-item">
+ <a class="reference internal nav-link" href="../../../basic_usage.html">
+  Basic Usage
  </a>
 </li>
 
@@ -99,7 +106,7 @@
 </li>
 
 <li class="toctree-l1 nav-item">
- <a class="reference internal nav-link" href="../../../examples.html">
+ <a class="reference internal nav-link" href="../../../_examples/index.html">
   Examples
  </a>
 </li>
@@ -182,7 +189,8 @@
               <article class="bd-article" role="main">
                 
   <h1>Source code for porespy.metrics._funcs</h1><div class="highlight"><pre>
-<span></span><span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span></span><span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
 <span class="kn">import</span> <span class="nn">scipy.ndimage</span> <span class="k">as</span> <span class="nn">spim</span>
 <span class="kn">import</span> <span class="nn">scipy.spatial</span> <span class="k">as</span> <span class="nn">sptl</span>
 <span class="kn">from</span> <span class="nn">scipy</span> <span class="kn">import</span> <span class="n">fft</span> <span class="k">as</span> <span class="n">sp_ft</span>
@@ -193,13 +201,107 @@
 <span class="kn">from</span> <span class="nn">porespy.tools</span> <span class="kn">import</span> <span class="n">Results</span>
 <span class="kn">from</span> <span class="nn">porespy</span> <span class="kn">import</span> <span class="n">settings</span>
 <span class="kn">from</span> <span class="nn">porespy.tools</span> <span class="kn">import</span> <span class="n">get_tqdm</span>
-<span class="kn">from</span> <span class="nn">loguru</span> <span class="kn">import</span> <span class="n">logger</span>
 <span class="kn">from</span> <span class="nn">numba</span> <span class="kn">import</span> <span class="n">njit</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">&quot;boxcount&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;chord_counts&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;chord_length_distribution&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;find_h&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;lineal_path_distribution&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;pore_size_distribution&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;radial_density_distribution&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;porosity&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;porosity_profile&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;representative_elementary_volume&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;satn_profile&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;two_point_correlation&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;phase_fraction&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;pc_curve&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;pc_curve_from_ibip&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;pc_curve_from_mio&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;pc_map_to_pc_curve&quot;</span><span class="p">,</span>
+<span class="p">]</span>
+
+
 <span class="n">tqdm</span> <span class="o">=</span> <span class="n">get_tqdm</span><span class="p">()</span>
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
 
 
-<div class="viewcode-block" id="representative_elementary_volume"><a class="viewcode-back" href="../../../modules/generated/porespy.metrics.representative_elementary_volume.html#porespy.metrics.representative_elementary_volume">[docs]</a><span class="k">def</span> <span class="nf">representative_elementary_volume</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">npoints</span><span class="o">=</span><span class="mi">1000</span><span class="p">):</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="boxcount"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.metrics.boxcount.html#porespy.metrics.boxcount">[docs]</a><span class="k">def</span> <span class="nf">boxcount</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="mi">10</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Calculates fractal dimension of an image using the tiled box counting</span>
+<span class="sd">    method [1]_</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    im : ndarray</span>
+<span class="sd">        The image of the porous material.</span>
+<span class="sd">    bins : int or array_like, optional</span>
+<span class="sd">        The number of box sizes to use. The default is 10 sizes</span>
+<span class="sd">        logarithmically spaced between 1 and ``min(im.shape)``.</span>
+<span class="sd">        If an array is provided, this is used directly.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    results</span>
+<span class="sd">        An object possessing the following attributes:</span>
+
+<span class="sd">        size : ndarray</span>
+<span class="sd">            The box sizes used</span>
+<span class="sd">        count : ndarray</span>
+<span class="sd">            The number of boxes of each size that contain both solid and void</span>
+<span class="sd">        slope : ndarray</span>
+<span class="sd">            The gradient of ``count``. This has the same number of elements as</span>
+<span class="sd">            ``count`` and</span>
+
+<span class="sd">    References</span>
+<span class="sd">    ----------</span>
+<span class="sd">    .. [1] See Boxcounting on `Wikipedia &lt;https://en.wikipedia.org/wiki/Box_counting&gt;`_</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+<span class="sd">    `Click here</span>
+<span class="sd">    &lt;https://porespy.org/examples/metrics/reference/box_counting.html&gt;`_</span>
+<span class="sd">    to view online example.</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">im</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">im</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">2</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">im</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">3</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;Image must be 2-dimensional or 3-dimensional&#39;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">bins</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+        <span class="n">Ds</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">logspace</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">log10</span><span class="p">(</span><span class="nb">min</span><span class="p">(</span><span class="n">im</span><span class="o">.</span><span class="n">shape</span><span class="p">)),</span> <span class="n">bins</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">))</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">Ds</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">bins</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+
+    <span class="n">N</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">tqdm</span><span class="p">(</span><span class="n">Ds</span><span class="p">,</span> <span class="o">**</span><span class="n">settings</span><span class="o">.</span><span class="n">tqdm</span><span class="p">):</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">im</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">d</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">im</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">d</span><span class="p">):</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">im</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
+                    <span class="n">temp</span> <span class="o">=</span> <span class="n">im</span><span class="p">[</span><span class="n">i</span><span class="p">:</span><span class="n">i</span><span class="o">+</span><span class="n">d</span><span class="p">,</span> <span class="n">j</span><span class="p">:</span><span class="n">j</span><span class="o">+</span><span class="n">d</span><span class="p">]</span>
+                    <span class="n">result</span> <span class="o">+=</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">temp</span><span class="p">)</span>
+                    <span class="n">result</span> <span class="o">-=</span> <span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">temp</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">im</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">d</span><span class="p">):</span>
+                        <span class="n">temp</span> <span class="o">=</span> <span class="n">im</span><span class="p">[</span><span class="n">i</span><span class="p">:</span><span class="n">i</span><span class="o">+</span><span class="n">d</span><span class="p">,</span> <span class="n">j</span><span class="p">:</span><span class="n">j</span><span class="o">+</span><span class="n">d</span><span class="p">,</span> <span class="n">k</span><span class="p">:</span><span class="n">k</span><span class="o">+</span><span class="n">d</span><span class="p">]</span>
+                        <span class="n">result</span> <span class="o">+=</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">temp</span><span class="p">)</span>
+                        <span class="n">result</span> <span class="o">-=</span> <span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">temp</span><span class="p">)</span>
+        <span class="n">N</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+    <span class="n">slope</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">gradient</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">N</span><span class="p">)),</span> <span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">Ds</span><span class="p">))</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">Results</span><span class="p">()</span>
+    <span class="n">data</span><span class="o">.</span><span class="n">size</span> <span class="o">=</span> <span class="n">Ds</span>
+    <span class="n">data</span><span class="o">.</span><span class="n">count</span> <span class="o">=</span> <span class="n">N</span>
+    <span class="n">data</span><span class="o">.</span><span class="n">slope</span> <span class="o">=</span> <span class="n">slope</span>
+    <span class="k">return</span> <span class="n">data</span></div>
+
+
+<div class="viewcode-block" id="representative_elementary_volume"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.metrics.representative_elementary_volume.html#porespy.metrics.representative_elementary_volume">[docs]</a><span class="k">def</span> <span class="nf">representative_elementary_volume</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">npoints</span><span class="o">=</span><span class="mi">1000</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Calculates the porosity of an image as a function subdomain size.</span>
 
 <span class="sd">    This function extracts a specified number of subdomains of random size,</span>
@@ -237,8 +339,8 @@
 <span class="sd">    References</span>
 <span class="sd">    ----------</span>
 <span class="sd">    .. [1] Bachmat and Bear. On the Concept and Size of a Representative</span>
-<span class="sd">    Elementary Volume (Rev), Advances in Transport Phenomena in Porous Media</span>
-<span class="sd">    (1987)</span>
+<span class="sd">       Elementary Volume (Rev), Advances in Transport Phenomena in Porous Media</span>
+<span class="sd">       (1987)</span>
 
 <span class="sd">    Examples</span>
 <span class="sd">    --------</span>
@@ -262,7 +364,7 @@
         <span class="n">p</span> <span class="o">=</span> <span class="n">pads</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
         <span class="n">new_s</span> <span class="o">=</span> <span class="n">extend_slice</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="n">im</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">pad</span><span class="o">=</span><span class="n">p</span><span class="p">)</span>
         <span class="n">temp</span> <span class="o">=</span> <span class="n">im</span><span class="p">[</span><span class="n">new_s</span><span class="p">]</span>
-        <span class="n">Vp</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">temp</span><span class="p">)</span>
+        <span class="n">Vp</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">temp</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
         <span class="n">Vt</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="n">temp</span><span class="p">)</span>
         <span class="n">porosity</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">Vp</span> <span class="o">/</span> <span class="n">Vt</span>
         <span class="n">volume</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">Vt</span>
@@ -272,8 +374,8 @@
     <span class="k">return</span> <span class="n">profile</span></div>
 
 
-<div class="viewcode-block" id="porosity"><a class="viewcode-back" href="../../../modules/generated/porespy.metrics.porosity.html#porespy.metrics.porosity">[docs]</a><span class="k">def</span> <span class="nf">porosity</span><span class="p">(</span><span class="n">im</span><span class="p">):</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="porosity"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.metrics.porosity.html#porespy.metrics.porosity">[docs]</a><span class="k">def</span> <span class="nf">porosity</span><span class="p">(</span><span class="n">im</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Calculates the porosity of an image assuming 1&#39;s are void space and 0&#39;s</span>
 <span class="sd">    are solid phase.</span>
 
@@ -315,15 +417,15 @@
 <span class="sd">    to view online example.</span>
 
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="n">im</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">)</span>
-    <span class="n">Vp</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">im</span> <span class="o">==</span> <span class="mi">1</span><span class="p">)</span>
-    <span class="n">Vs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">im</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="n">im</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+    <span class="n">Vp</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">im</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+    <span class="n">Vs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">im</span> <span class="o">==</span> <span class="mi">0</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
     <span class="n">e</span> <span class="o">=</span> <span class="n">Vp</span> <span class="o">/</span> <span class="p">(</span><span class="n">Vs</span> <span class="o">+</span> <span class="n">Vp</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">e</span></div>
 
 
-<div class="viewcode-block" id="porosity_profile"><a class="viewcode-back" href="../../../modules/generated/porespy.metrics.porosity_profile.html#porespy.metrics.porosity_profile">[docs]</a><span class="k">def</span> <span class="nf">porosity_profile</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">):</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="porosity_profile"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.metrics.porosity_profile.html#porespy.metrics.porosity_profile">[docs]</a><span class="k">def</span> <span class="nf">porosity_profile</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Computes the porosity profile along the specified axis</span>
 
 <span class="sd">    Parameters</span>
@@ -353,12 +455,13 @@
     <span class="n">im</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">atleast_3d</span><span class="p">(</span><span class="n">im</span><span class="p">)</span>
     <span class="n">a</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">im</span><span class="o">.</span><span class="n">ndim</span><span class="p">))</span><span class="o">.</span><span class="n">difference</span><span class="p">(</span><span class="nb">set</span><span class="p">([</span><span class="n">axis</span><span class="p">]))</span>
     <span class="n">a1</span><span class="p">,</span> <span class="n">a2</span> <span class="o">=</span> <span class="n">a</span>
-    <span class="n">prof</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">im</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="n">a2</span><span class="p">),</span> <span class="n">axis</span><span class="o">=</span><span class="n">a1</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">im</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="n">a2</span><span class="p">]</span> <span class="o">*</span> <span class="n">im</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="n">a1</span><span class="p">])</span>
+    <span class="n">tmp</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">im</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="n">a2</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">),</span> <span class="n">axis</span><span class="o">=</span><span class="n">a1</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+    <span class="n">prof</span> <span class="o">=</span> <span class="n">tmp</span> <span class="o">/</span> <span class="p">(</span><span class="n">im</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="n">a2</span><span class="p">]</span> <span class="o">*</span> <span class="n">im</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="n">a1</span><span class="p">])</span>
     <span class="k">return</span> <span class="n">prof</span></div>
 
 
-<div class="viewcode-block" id="radial_density_distribution"><a class="viewcode-back" href="../../../modules/generated/porespy.metrics.radial_density_distribution.html#porespy.metrics.radial_density_distribution">[docs]</a><span class="k">def</span> <span class="nf">radial_density_distribution</span><span class="p">(</span><span class="n">dt</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">log</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">voxel_size</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="radial_density_distribution"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.metrics.radial_density_distribution.html#porespy.metrics.radial_density_distribution">[docs]</a><span class="k">def</span> <span class="nf">radial_density_distribution</span><span class="p">(</span><span class="n">dt</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">log</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">voxel_size</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Computes radial density function by analyzing the histogram of voxel</span>
 <span class="sd">    values in the distance transform.  This function is defined by</span>
 <span class="sd">    Torquato [1] as:</span>
@@ -447,7 +550,7 @@
     <span class="n">h</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">histogram</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="n">bins</span><span class="p">,</span> <span class="n">density</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
     <span class="n">h</span> <span class="o">=</span> <span class="n">_parse_histogram</span><span class="p">(</span><span class="n">h</span><span class="o">=</span><span class="n">h</span><span class="p">,</span> <span class="n">voxel_size</span><span class="o">=</span><span class="n">voxel_size</span><span class="p">)</span>
     <span class="n">rdf</span> <span class="o">=</span> <span class="n">Results</span><span class="p">()</span>
-    <span class="n">rdf</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">log</span><span class="o">*</span><span class="s1">&#39;Log&#39;</span> <span class="o">+</span> <span class="s1">&#39;R&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">bin_centers</span>
+    <span class="n">rdf</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">log</span><span class="o">*</span><span class="s1">&#39;Log&#39;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s1">&#39;R&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">bin_centers</span>
     <span class="n">rdf</span><span class="o">.</span><span class="n">pdf</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">pdf</span>
     <span class="n">rdf</span><span class="o">.</span><span class="n">cdf</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">cdf</span>
     <span class="n">rdf</span><span class="o">.</span><span class="n">relfreq</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">relfreq</span>
@@ -457,8 +560,8 @@
     <span class="k">return</span> <span class="n">rdf</span></div>
 
 
-<div class="viewcode-block" id="lineal_path_distribution"><a class="viewcode-back" href="../../../modules/generated/porespy.metrics.lineal_path_distribution.html#porespy.metrics.lineal_path_distribution">[docs]</a><span class="k">def</span> <span class="nf">lineal_path_distribution</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">voxel_size</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">log</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="lineal_path_distribution"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.metrics.lineal_path_distribution.html#porespy.metrics.lineal_path_distribution">[docs]</a><span class="k">def</span> <span class="nf">lineal_path_distribution</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">voxel_size</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">log</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Determines the probability that a point lies within a certain distance</span>
 <span class="sd">    of the opposite phase *along a specified direction*</span>
 
@@ -529,7 +632,7 @@
     <span class="n">h</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">histogram</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="n">bins</span><span class="p">,</span> <span class="n">density</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
     <span class="n">h</span> <span class="o">=</span> <span class="n">_parse_histogram</span><span class="p">(</span><span class="n">h</span><span class="o">=</span><span class="n">h</span><span class="p">,</span> <span class="n">voxel_size</span><span class="o">=</span><span class="n">voxel_size</span><span class="p">)</span>
     <span class="n">cld</span> <span class="o">=</span> <span class="n">Results</span><span class="p">()</span>
-    <span class="n">cld</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">log</span><span class="o">*</span><span class="s1">&#39;Log&#39;</span> <span class="o">+</span> <span class="s1">&#39;L&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">bin_centers</span>
+    <span class="n">cld</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">log</span><span class="o">*</span><span class="s1">&#39;Log&#39;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s1">&#39;L&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">bin_centers</span>
     <span class="n">cld</span><span class="o">.</span><span class="n">pdf</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">pdf</span>
     <span class="n">cld</span><span class="o">.</span><span class="n">cdf</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">cdf</span>
     <span class="n">cld</span><span class="o">.</span><span class="n">relfreq</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">relfreq</span>
@@ -539,9 +642,9 @@
     <span class="k">return</span> <span class="n">cld</span></div>
 
 
-<div class="viewcode-block" id="chord_length_distribution"><a class="viewcode-back" href="../../../modules/generated/porespy.metrics.chord_length_distribution.html#porespy.metrics.chord_length_distribution">[docs]</a><span class="k">def</span> <span class="nf">chord_length_distribution</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">log</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">voxel_size</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+<div class="viewcode-block" id="chord_length_distribution"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.metrics.chord_length_distribution.html#porespy.metrics.chord_length_distribution">[docs]</a><span class="k">def</span> <span class="nf">chord_length_distribution</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">log</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">voxel_size</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
                               <span class="n">normalization</span><span class="o">=</span><span class="s1">&#39;count&#39;</span><span class="p">):</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Determines the distribution of chord lengths in an image containing chords.</span>
 
 <span class="sd">    Parameters</span>
@@ -623,15 +726,17 @@
         <span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">log10</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">normalization</span> <span class="o">==</span> <span class="s1">&#39;length&#39;</span><span class="p">:</span>
         <span class="n">h</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">histogram</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="n">bins</span><span class="p">,</span> <span class="n">density</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
-        <span class="n">h</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">h</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="n">h</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">:]</span> <span class="o">+</span> <span class="n">h</span><span class="p">[</span><span class="mi">1</span><span class="p">][:</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span> <span class="o">/</span> <span class="mi">2</span>  <span class="c1"># Scale bin heigths by length</span>
-        <span class="n">h</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">h</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">/</span> <span class="n">h</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">/</span> <span class="p">(</span><span class="n">h</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">:]</span> <span class="o">-</span> <span class="n">h</span><span class="p">[</span><span class="mi">1</span><span class="p">][:</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>  <span class="c1"># Normalize h[0] manually</span>
+        <span class="c1"># Scale bin heigths by length</span>
+        <span class="n">h</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">h</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="n">h</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">:]</span> <span class="o">+</span> <span class="n">h</span><span class="p">[</span><span class="mi">1</span><span class="p">][:</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span> <span class="o">/</span> <span class="mi">2</span>
+        <span class="c1"># Normalize h[0] manually</span>
+        <span class="n">h</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">h</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">/</span> <span class="n">h</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">h</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">:]</span> <span class="o">-</span> <span class="n">h</span><span class="p">[</span><span class="mi">1</span><span class="p">][:</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
     <span class="k">elif</span> <span class="n">normalization</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;number&#39;</span><span class="p">,</span> <span class="s1">&#39;count&#39;</span><span class="p">]:</span>
         <span class="n">h</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">histogram</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="n">bins</span><span class="p">,</span> <span class="n">density</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
     <span class="k">else</span><span class="p">:</span>
         <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;Unsupported normalization:&#39;</span><span class="p">,</span> <span class="n">normalization</span><span class="p">)</span>
     <span class="n">h</span> <span class="o">=</span> <span class="n">_parse_histogram</span><span class="p">(</span><span class="n">h</span><span class="p">)</span>
     <span class="n">cld</span> <span class="o">=</span> <span class="n">Results</span><span class="p">()</span>
-    <span class="n">cld</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">log</span><span class="o">*</span><span class="s1">&#39;Log&#39;</span> <span class="o">+</span> <span class="s1">&#39;L&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">bin_centers</span>
+    <span class="n">cld</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">log</span><span class="o">*</span><span class="s1">&#39;Log&#39;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s1">&#39;L&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">bin_centers</span>
     <span class="n">cld</span><span class="o">.</span><span class="n">pdf</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">pdf</span>
     <span class="n">cld</span><span class="o">.</span><span class="n">cdf</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">cdf</span>
     <span class="n">cld</span><span class="o">.</span><span class="n">relfreq</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">relfreq</span>
@@ -641,8 +746,8 @@
     <span class="k">return</span> <span class="n">cld</span></div>
 
 
-<div class="viewcode-block" id="pore_size_distribution"><a class="viewcode-back" href="../../../modules/generated/porespy.metrics.pore_size_distribution.html#porespy.metrics.pore_size_distribution">[docs]</a><span class="k">def</span> <span class="nf">pore_size_distribution</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">log</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">voxel_size</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="pore_size_distribution"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.metrics.pore_size_distribution.html#porespy.metrics.pore_size_distribution">[docs]</a><span class="k">def</span> <span class="nf">pore_size_distribution</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">log</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">voxel_size</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Calculate a pore-size distribution based on the image produced by the</span>
 <span class="sd">    ``porosimetry`` or ``local_thickness`` functions.</span>
 
@@ -708,7 +813,7 @@
         <span class="n">vals</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">log10</span><span class="p">(</span><span class="n">vals</span><span class="p">)</span>
     <span class="n">h</span> <span class="o">=</span> <span class="n">_parse_histogram</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">histogram</span><span class="p">(</span><span class="n">vals</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="n">bins</span><span class="p">,</span> <span class="n">density</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
     <span class="n">cld</span> <span class="o">=</span> <span class="n">Results</span><span class="p">()</span>
-    <span class="n">cld</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">log</span><span class="o">*</span><span class="s1">&#39;Log&#39;</span> <span class="o">+</span> <span class="s1">&#39;R&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">bin_centers</span>
+    <span class="n">cld</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">log</span><span class="o">*</span><span class="s1">&#39;Log&#39;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s1">&#39;R&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">bin_centers</span>
     <span class="n">cld</span><span class="o">.</span><span class="n">pdf</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">pdf</span>
     <span class="n">cld</span><span class="o">.</span><span class="n">cdf</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">cdf</span>
     <span class="n">cld</span><span class="o">.</span><span class="n">satn</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">relfreq</span>
@@ -719,7 +824,7 @@
 
 
 <span class="k">def</span> <span class="nf">two_point_correlation_bf</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mi">10</span><span class="p">):</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Calculates the two-point correlation function using brute-force (see Notes)</span>
 
 <span class="sd">    Parameters</span>
@@ -787,7 +892,7 @@
 
 
 <span class="k">def</span> <span class="nf">_radial_profile</span><span class="p">(</span><span class="n">autocorr</span><span class="p">,</span> <span class="n">bins</span><span class="p">,</span> <span class="n">pf</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">voxel_size</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Helper functions to calculate the radial profile of the autocorrelation</span>
 
 <span class="sd">    Masks the image in radial segments from the center and averages the values</span>
@@ -817,21 +922,25 @@
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">autocorr</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
         <span class="n">adj</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">autocorr</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">])</span>
-        <span class="c1"># use np.round otherwise with odd image sizes, the mask generated can be zero,</span>
-        <span class="c1"># resulting in Div/0 error</span>
+        <span class="c1"># use np.round otherwise with odd image sizes, the mask generated can</span>
+        <span class="c1"># be zero, resulting in Div/0 error</span>
         <span class="n">inds</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">indices</span><span class="p">(</span><span class="n">autocorr</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">adj</span> <span class="o">/</span> <span class="mi">2</span><span class="p">)</span>
         <span class="n">dt</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">inds</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">inds</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span>
     <span class="k">elif</span> <span class="nb">len</span><span class="p">(</span><span class="n">autocorr</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">3</span><span class="p">:</span>
         <span class="n">adj</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">autocorr</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="p">[</span><span class="mi">3</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">])</span>
-        <span class="c1"># use np.round otherwise with odd image sizes, the mask generated can be zero,</span>
-        <span class="c1"># resulting in Div/0 error</span>
+        <span class="c1"># use np.round otherwise with odd image sizes, the mask generated can</span>
+        <span class="c1"># be zero, resulting in Div/0 error</span>
         <span class="n">inds</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">indices</span><span class="p">(</span><span class="n">autocorr</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">adj</span> <span class="o">/</span> <span class="mi">2</span><span class="p">)</span>
         <span class="n">dt</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">inds</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">inds</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">inds</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span>
     <span class="k">else</span><span class="p">:</span>
         <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;Image dimensions must be 2 or 3&#39;</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">bins</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">dt</span><span class="p">):</span>
-        <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;Bins specified distances exceeding maximum radial distance for image size. </span><span class="se">\n</span><span class="s1">&#39;</span>
-                        <span class="s1">&#39;Radial distance cannot exceed distance from center of image to corner.&#39;</span><span class="p">)</span>
+        <span class="n">msg</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="s1">&#39;Bins specified distances exceeding maximum radial distance for&#39;</span>
+            <span class="s1">&#39; image size. Radial distance cannot exceed distance from center&#39;</span>
+            <span class="s1">&#39; of image to corner.&#39;</span>
+        <span class="p">)</span>
+        <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
 
     <span class="n">bin_size</span> <span class="o">=</span> <span class="n">bins</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span> <span class="o">-</span> <span class="n">bins</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
     <span class="n">radial_sum</span> <span class="o">=</span> <span class="n">_get_radial_sum</span><span class="p">(</span><span class="n">dt</span><span class="p">,</span> <span class="n">bins</span><span class="p">,</span> <span class="n">bin_size</span><span class="p">,</span> <span class="n">autocorr</span><span class="p">)</span>
@@ -850,16 +959,19 @@
     <span class="n">tpcf</span><span class="o">.</span><span class="n">relfreq</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">relfreq</span>
     <span class="k">return</span> <span class="n">tpcf</span>
 
-<span class="nd">@njit</span><span class="p">(</span><span class="n">parallel</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="nd">@njit</span><span class="p">(</span><span class="n">parallel</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 <span class="k">def</span> <span class="nf">_get_radial_sum</span><span class="p">(</span><span class="n">dt</span><span class="p">,</span> <span class="n">bins</span><span class="p">,</span> <span class="n">bin_size</span><span class="p">,</span> <span class="n">autocorr</span><span class="p">):</span>
     <span class="n">radial_sum</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">bins</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
     <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">bins</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]):</span>
         <span class="n">mask</span> <span class="o">=</span> <span class="p">(</span><span class="n">dt</span> <span class="o">&lt;=</span> <span class="n">r</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="n">dt</span> <span class="o">&gt;</span> <span class="p">(</span><span class="n">r</span> <span class="o">-</span> <span class="n">bin_size</span><span class="p">[</span><span class="n">i</span><span class="p">]))</span>
-        <span class="n">radial_sum</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ravel</span><span class="p">(</span><span class="n">autocorr</span><span class="p">)[</span><span class="n">np</span><span class="o">.</span><span class="n">ravel</span><span class="p">(</span><span class="n">mask</span><span class="p">)])</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">mask</span><span class="p">)</span>
+        <span class="n">radial_sum</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ravel</span><span class="p">(</span><span class="n">autocorr</span><span class="p">)[</span><span class="n">np</span><span class="o">.</span><span class="n">ravel</span><span class="p">(</span><span class="n">mask</span><span class="p">)],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span> \
+            <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">mask</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">radial_sum</span>
 
-<div class="viewcode-block" id="two_point_correlation"><a class="viewcode-back" href="../../../modules/generated/porespy.metrics.two_point_correlation.html#porespy.metrics.two_point_correlation">[docs]</a><span class="k">def</span> <span class="nf">two_point_correlation</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">voxel_size</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="mi">100</span><span class="p">):</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="two_point_correlation"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.metrics.two_point_correlation.html#porespy.metrics.two_point_correlation">[docs]</a><span class="k">def</span> <span class="nf">two_point_correlation</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">voxel_size</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="mi">100</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Calculate the two-point correlation function using Fourier transforms</span>
 
 <span class="sd">    Parameters</span>
@@ -868,19 +980,22 @@
 <span class="sd">        The image of the void space on which the 2-point correlation is</span>
 <span class="sd">        desired, in which the phase of interest is labelled as True</span>
 <span class="sd">    voxel_size : scalar</span>
-<span class="sd">        The size of a voxel side in preferred units.  The default is 1, so the</span>
-<span class="sd">        user can apply the scaling to the returned results after the fact.</span>
+<span class="sd">        The size of a voxel side in preferred units.  The default is 1, so</span>
+<span class="sd">        the user can apply the scaling to the returned results after the</span>
+<span class="sd">        fact.</span>
 <span class="sd">    bins : scalar or array_like</span>
-<span class="sd">        Either an array of bin sizes to use, or the number of bins that should</span>
-<span class="sd">        be automatically generated that span the data range. The maximum value of the bins,</span>
-<span class="sd">        if passed as an array, cannot exceed the distance from the center of the image to the corner</span>
+<span class="sd">        Either an array of bin sizes to use, or the number of bins that</span>
+<span class="sd">        should be automatically generated that span the data range. The</span>
+<span class="sd">        maximum value of the bins, if passed as an array, cannot exceed</span>
+<span class="sd">        the distance from the center of the image to the corner.</span>
 
 <span class="sd">    Returns</span>
 <span class="sd">    -------</span>
 <span class="sd">    result : tpcf</span>
-<span class="sd">        the two - point correlation function object, with named attributes:</span>
-<span class="sd">        *distance*:</span>
-<span class="sd">            The distance between two points - equivalent to bin_centers</span>
+<span class="sd">        The two-point correlation function object, with named attributes:</span>
+
+<span class="sd">        *distance*</span>
+<span class="sd">            The distance between two points, equivalent to bin_centers</span>
 <span class="sd">        *bin_centers*</span>
 <span class="sd">            The center point of each bin. See distance</span>
 <span class="sd">        *bin_edges*</span>
@@ -889,19 +1004,20 @@
 <span class="sd">        *bin_widths*</span>
 <span class="sd">            Useful for passing to the ``width`` argument of</span>
 <span class="sd">            ``matplotlib.pyplot.bar``</span>
-<span class="sd">        *probability_normalized* :</span>
+<span class="sd">        *probability_normalized*</span>
 <span class="sd">            The probability that two points of the stated separation distance</span>
 <span class="sd">            are within the same phase normalized to 1 at r = 0</span>
-<span class="sd">        *probability* or *pdf* :</span>
+<span class="sd">        *probability* or *pdf*</span>
 <span class="sd">            The probability that two points of the stated separation distance</span>
 <span class="sd">            are within the same phase scaled to the phase fraction at r = 0</span>
+
 <span class="sd">    Notes</span>
 <span class="sd">    -----</span>
 <span class="sd">    The fourier transform approach utilizes the fact that the</span>
 <span class="sd">    autocorrelation function is the inverse FT of the power spectrum</span>
 <span class="sd">    density. For background read the Scipy fftpack docs and for a good</span>
 <span class="sd">    explanation `see this thesis</span>
-<span class="sd">    &lt;https://www.ucl.ac.uk/~ucapikr/projects/KamilaSuankulova_BSc_Project.pdf&gt;`_</span>
+<span class="sd">    &lt;https://www.ucl.ac.uk/~ucapikr/projects/KamilaSuankulova_BSc_Project.pdf&gt;`_.</span>
 
 <span class="sd">    Examples</span>
 <span class="sd">    --------</span>
@@ -910,7 +1026,7 @@
 <span class="sd">    to view online example.</span>
 
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="c1"># Get the number of CPUs available for parallel processing of Fourier transforms</span>
+    <span class="c1"># Get the number of CPUs available to parallel process Fourier transforms</span>
     <span class="n">cpus</span> <span class="o">=</span> <span class="n">settings</span><span class="o">.</span><span class="n">ncores</span>
     <span class="c1"># Get the phase fraction of the image</span>
     <span class="n">pf</span> <span class="o">=</span> <span class="n">porosity</span><span class="p">(</span><span class="n">im</span><span class="p">)</span>
@@ -959,8 +1075,8 @@
     <span class="k">return</span> <span class="n">hist</span>
 
 
-<div class="viewcode-block" id="chord_counts"><a class="viewcode-back" href="../../../modules/generated/porespy.metrics.chord_counts.html#porespy.metrics.chord_counts">[docs]</a><span class="k">def</span> <span class="nf">chord_counts</span><span class="p">(</span><span class="n">im</span><span class="p">):</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="chord_counts"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.metrics.chord_counts.html#porespy.metrics.chord_counts">[docs]</a><span class="k">def</span> <span class="nf">chord_counts</span><span class="p">(</span><span class="n">im</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Find the length of each chord in the supplied image</span>
 
 <span class="sd">    Parameters</span>
@@ -989,12 +1105,12 @@
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="n">labels</span><span class="p">,</span> <span class="n">N</span> <span class="o">=</span> <span class="n">spim</span><span class="o">.</span><span class="n">label</span><span class="p">(</span><span class="n">im</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span>
     <span class="n">props</span> <span class="o">=</span> <span class="n">regionprops</span><span class="p">(</span><span class="n">labels</span><span class="p">)</span>
-    <span class="n">chord_lens</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">i</span><span class="o">.</span><span class="n">filled_area</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">props</span><span class="p">])</span>
+    <span class="n">chord_lens</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">i</span><span class="o">.</span><span class="n">filled_area</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">props</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">int</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">chord_lens</span></div>
 
 
-<div class="viewcode-block" id="phase_fraction"><a class="viewcode-back" href="../../../modules/generated/porespy.metrics.phase_fraction.html#porespy.metrics.phase_fraction">[docs]</a><span class="k">def</span> <span class="nf">phase_fraction</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">normed</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="phase_fraction"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.metrics.phase_fraction.html#porespy.metrics.phase_fraction">[docs]</a><span class="k">def</span> <span class="nf">phase_fraction</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">normed</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Calculate the fraction of each phase in an image</span>
 
 <span class="sd">    Parameters</span>
@@ -1028,13 +1144,14 @@
     <span class="n">labels</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">im</span><span class="p">)</span>
     <span class="n">results</span> <span class="o">=</span> <span class="p">{}</span>
     <span class="k">for</span> <span class="n">label</span> <span class="ow">in</span> <span class="n">labels</span><span class="p">:</span>
-        <span class="n">results</span><span class="p">[</span><span class="n">label</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">im</span> <span class="o">==</span> <span class="n">label</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">/</span> <span class="n">im</span><span class="o">.</span><span class="n">size</span> <span class="k">if</span> <span class="n">normed</span> <span class="k">else</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="n">results</span><span class="p">[</span><span class="n">label</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">im</span> <span class="o">==</span> <span class="n">label</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span> <span class="o">*</span> \
+            <span class="p">(</span><span class="mi">1</span> <span class="o">/</span> <span class="n">im</span><span class="o">.</span><span class="n">size</span> <span class="k">if</span> <span class="n">normed</span> <span class="k">else</span> <span class="mi">1</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">results</span></div>
 
 
-<div class="viewcode-block" id="pc_curve_from_ibip"><a class="viewcode-back" href="../../../modules/generated/porespy.metrics.pc_curve_from_ibip.html#porespy.metrics.pc_curve_from_ibip">[docs]</a><span class="nd">@deprecated</span><span class="p">(</span><span class="s2">&quot;This function is deprecated, use pc_curve instead&quot;</span><span class="p">)</span>
+<div class="viewcode-block" id="pc_curve_from_ibip"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.metrics.pc_curve_from_ibip.html#porespy.metrics.pc_curve_from_ibip">[docs]</a><span class="nd">@deprecated</span><span class="p">(</span><span class="s2">&quot;This function is deprecated, use pc_curve instead&quot;</span><span class="p">)</span>
 <span class="k">def</span> <span class="nf">pc_curve_from_ibip</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    This function is deprecated.  Use ``pc_curve`` instead.  Note that the</span>
 <span class="sd">    ``stepped`` argument is no longer supported since this can be done</span>
 <span class="sd">    directly in matplotlib with ``plt.step(...)``.</span>
@@ -1043,17 +1160,17 @@
     <span class="k">return</span> <span class="n">pc_curve</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
 
 
-<div class="viewcode-block" id="pc_curve_from_mio"><a class="viewcode-back" href="../../../modules/generated/porespy.metrics.pc_curve_from_mio.html#porespy.metrics.pc_curve_from_mio">[docs]</a><span class="nd">@deprecated</span><span class="p">(</span><span class="s2">&quot;This function is deprecated, use pc_curve instead&quot;</span><span class="p">)</span>
+<div class="viewcode-block" id="pc_curve_from_mio"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.metrics.pc_curve_from_mio.html#porespy.metrics.pc_curve_from_mio">[docs]</a><span class="nd">@deprecated</span><span class="p">(</span><span class="s2">&quot;This function is deprecated, use pc_curve instead&quot;</span><span class="p">)</span>
 <span class="k">def</span> <span class="nf">pc_curve_from_mio</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    This function is deprecated.  Use ``pc_curve`` instead.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">return</span> <span class="n">pc_curve</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
 
 
-<div class="viewcode-block" id="pc_curve"><a class="viewcode-back" href="../../../modules/generated/porespy.metrics.pc_curve.html#porespy.metrics.pc_curve">[docs]</a><span class="k">def</span> <span class="nf">pc_curve</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">sizes</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">pc</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">seq</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<div class="viewcode-block" id="pc_curve"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.metrics.pc_curve.html#porespy.metrics.pc_curve">[docs]</a><span class="k">def</span> <span class="nf">pc_curve</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">sizes</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">pc</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">seq</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
              <span class="n">sigma</span><span class="o">=</span><span class="mf">0.072</span><span class="p">,</span> <span class="n">theta</span><span class="o">=</span><span class="mi">180</span><span class="p">,</span> <span class="n">voxel_size</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Produces a Pc-Snwp curve given a map of meniscus radii or capillary</span>
 <span class="sd">    pressures at which each voxel was invaded</span>
 
@@ -1130,11 +1247,16 @@
             <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">seqs</span><span class="p">:</span>
                 <span class="n">pbar</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
                 <span class="n">mask</span> <span class="o">=</span> <span class="n">seq</span> <span class="o">==</span> <span class="n">n</span>
-                <span class="c1"># The following assumes only one size found, which was confirmed</span>
-                <span class="n">r</span> <span class="o">=</span> <span class="n">sizes</span><span class="p">[</span><span class="n">mask</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="o">*</span><span class="n">voxel_size</span>
-                <span class="n">pc</span> <span class="o">=</span> <span class="o">-</span><span class="mi">2</span><span class="o">*</span><span class="n">sigma</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">deg2rad</span><span class="p">(</span><span class="n">theta</span><span class="p">))</span><span class="o">/</span><span class="n">r</span>
-                <span class="n">x</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">pc</span><span class="p">)</span>
-                <span class="n">snwp</span> <span class="o">=</span> <span class="p">((</span><span class="n">seq</span> <span class="o">&lt;=</span> <span class="n">n</span><span class="p">)</span><span class="o">*</span><span class="p">(</span><span class="n">seq</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span><span class="o">*</span><span class="p">(</span><span class="n">im</span> <span class="o">==</span> <span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">/</span><span class="n">im</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+                <span class="k">if</span> <span class="p">(</span><span class="n">pc</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="n">sizes</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">):</span>
+                    <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;Only one of pc or sizes can be specified&quot;</span><span class="p">)</span>
+                <span class="k">elif</span> <span class="n">pc</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">pressure</span> <span class="o">=</span> <span class="n">pc</span><span class="p">[</span><span class="n">mask</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+                <span class="k">elif</span> <span class="n">sizes</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">r</span> <span class="o">=</span> <span class="n">sizes</span><span class="p">[</span><span class="n">mask</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="o">*</span><span class="n">voxel_size</span>
+                    <span class="n">pressure</span> <span class="o">=</span> <span class="o">-</span><span class="mi">2</span><span class="o">*</span><span class="n">sigma</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">deg2rad</span><span class="p">(</span><span class="n">theta</span><span class="p">))</span><span class="o">/</span><span class="n">r</span>
+                <span class="n">x</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">pressure</span><span class="p">)</span>
+                <span class="n">snwp</span> <span class="o">=</span> <span class="p">((</span><span class="n">seq</span> <span class="o">&lt;=</span> <span class="n">n</span><span class="p">)</span><span class="o">*</span><span class="p">(</span><span class="n">seq</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span> <span class="o">*</span>
+                        <span class="p">(</span><span class="n">im</span> <span class="o">==</span> <span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span><span class="o">/</span><span class="n">im</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
                 <span class="n">y</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">snwp</span><span class="p">)</span>
         <span class="n">pc_curve</span> <span class="o">=</span> <span class="n">Results</span><span class="p">()</span>
         <span class="n">pc_curve</span><span class="o">.</span><span class="n">pc</span> <span class="o">=</span> <span class="n">x</span>
@@ -1152,7 +1274,7 @@
                 <span class="n">r</span> <span class="o">=</span> <span class="n">n</span><span class="o">*</span><span class="n">voxel_size</span>
                 <span class="n">pc</span> <span class="o">=</span> <span class="o">-</span><span class="mi">2</span><span class="o">*</span><span class="n">sigma</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">deg2rad</span><span class="p">(</span><span class="n">theta</span><span class="p">))</span><span class="o">/</span><span class="n">r</span>
                 <span class="n">x</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">pc</span><span class="p">)</span>
-                <span class="n">snwp</span> <span class="o">=</span> <span class="p">((</span><span class="n">sizes</span> <span class="o">&gt;=</span> <span class="n">n</span><span class="p">)</span><span class="o">*</span><span class="p">(</span><span class="n">im</span> <span class="o">==</span> <span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">/</span><span class="n">im</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+                <span class="n">snwp</span> <span class="o">=</span> <span class="p">((</span><span class="n">sizes</span> <span class="o">&gt;=</span> <span class="n">n</span><span class="p">)</span><span class="o">*</span><span class="p">(</span><span class="n">im</span> <span class="o">==</span> <span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span><span class="o">/</span><span class="n">im</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
                 <span class="n">y</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">snwp</span><span class="p">)</span>
         <span class="n">pc_curve</span> <span class="o">=</span> <span class="n">Results</span><span class="p">()</span>
         <span class="n">pc_curve</span><span class="o">.</span><span class="n">pc</span> <span class="o">=</span> <span class="n">x</span>
@@ -1168,18 +1290,74 @@
             <span class="c1"># Add a point at begining to ensure curve starts a 0, if no residual</span>
             <span class="n">Ps</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">hstack</span><span class="p">((</span><span class="n">Ps</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">Ps</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">/</span><span class="mi">2</span><span class="p">),</span> <span class="n">Ps</span><span class="p">))</span>
         <span class="n">y</span> <span class="o">=</span> <span class="p">[]</span>
-        <span class="n">Vp</span> <span class="o">=</span> <span class="n">im</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+        <span class="n">Vp</span> <span class="o">=</span> <span class="n">im</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
         <span class="n">temp</span> <span class="o">=</span> <span class="n">pc</span><span class="p">[</span><span class="n">im</span><span class="p">]</span>
         <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">tqdm</span><span class="p">(</span><span class="n">Ps</span><span class="p">,</span> <span class="o">**</span><span class="n">settings</span><span class="o">.</span><span class="n">tqdm</span><span class="p">):</span>
-            <span class="n">y</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">temp</span> <span class="o">&lt;=</span> <span class="n">p</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">/</span><span class="n">Vp</span><span class="p">)</span>
+            <span class="n">y</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">temp</span> <span class="o">&lt;=</span> <span class="n">p</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span><span class="o">/</span><span class="n">Vp</span><span class="p">)</span>
         <span class="n">pc_curve</span> <span class="o">=</span> <span class="n">Results</span><span class="p">()</span>
         <span class="n">pc_curve</span><span class="o">.</span><span class="n">pc</span> <span class="o">=</span> <span class="n">Ps</span>
         <span class="n">pc_curve</span><span class="o">.</span><span class="n">snwp</span> <span class="o">=</span> <span class="n">y</span>
     <span class="k">return</span> <span class="n">pc_curve</span></div>
 
 
-<div class="viewcode-block" id="satn_profile"><a class="viewcode-back" href="../../../modules/generated/porespy.metrics.satn_profile.html#porespy.metrics.satn_profile">[docs]</a><span class="k">def</span> <span class="nf">satn_profile</span><span class="p">(</span><span class="n">satn</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">span</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;tile&#39;</span><span class="p">):</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="k">def</span> <span class="nf">pc_map_to_pc_curve</span><span class="p">(</span><span class="n">pc</span><span class="p">,</span> <span class="n">im</span><span class="p">,</span> <span class="n">seq</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Converts a pc map into a capillary pressure curve</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    pc : ndarray</span>
+<span class="sd">        A numpy array with each voxel containing the capillary pressure at which</span>
+<span class="sd">        it was invaded. `-inf` indicates voxels which are already filled with</span>
+<span class="sd">        non-wetting fluid, and `+inf` indicates voxels that are not invaded by</span>
+<span class="sd">        non-wetting fluid (e.g., trapped wetting phase). Solids should be</span>
+<span class="sd">        noted by `+inf` but this is also enforced inside the function using `im`.</span>
+<span class="sd">    im : ndarray</span>
+<span class="sd">        A numpy array with `True` values indicating the void space and `False`</span>
+<span class="sd">        elsewhere. This is necessary to define the total void volume of the domain</span>
+<span class="sd">        for computing the saturation.</span>
+<span class="sd">    seq : ndarray, optional</span>
+<span class="sd">        A numpy array with each voxel containing the sequence at which it was</span>
+<span class="sd">        invaded. This is required when analyzing results from invasion percolation</span>
+<span class="sd">        since the pressures in `pc` do not correspond to the sequence in which</span>
+<span class="sd">        they were filled.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    results : dataclass-like</span>
+<span class="sd">        A dataclass like object with the following attributes:</span>
+
+<span class="sd">        ================== =========================================================</span>
+<span class="sd">        Attribute          Description</span>
+<span class="sd">        ================== =========================================================</span>
+<span class="sd">        pc                 The capillary pressure</span>
+<span class="sd">        snwp               The fraction of void space filled by non-wetting</span>
+<span class="sd">                           phase at each pressure in ``pc``</span>
+<span class="sd">        ================== =========================================================</span>
+
+<span class="sd">    Notes</span>
+<span class="sd">    -----</span>
+<span class="sd">    To use this function with the results of `porosimetry` or `ibip` the sizes map</span>
+<span class="sd">    must be converted to a capillary pressure map first.  `drainage` and `invasion`</span>
+<span class="sd">    both return capillary pressure maps which can be passed directly as `pc`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">pc</span><span class="p">[</span><span class="o">~</span><span class="n">im</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">inf</span>  <span class="c1"># Ensure solid voxels are set to inf invasion pressure</span>
+    <span class="k">if</span> <span class="n">seq</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">pcs</span><span class="p">,</span> <span class="n">counts</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">pc</span><span class="p">,</span> <span class="n">return_counts</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">vals</span><span class="p">,</span> <span class="n">index</span><span class="p">,</span> <span class="n">counts</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">seq</span><span class="p">,</span> <span class="n">return_index</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">return_counts</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">pcs</span> <span class="o">=</span> <span class="n">pc</span><span class="o">.</span><span class="n">flatten</span><span class="p">()[</span><span class="n">index</span><span class="p">]</span>
+    <span class="n">snwp</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cumsum</span><span class="p">(</span><span class="n">counts</span><span class="p">[</span><span class="n">pcs</span> <span class="o">&lt;</span> <span class="n">np</span><span class="o">.</span><span class="n">inf</span><span class="p">])</span><span class="o">/</span><span class="n">im</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="n">pcs</span> <span class="o">=</span> <span class="n">pcs</span><span class="p">[</span><span class="n">pcs</span> <span class="o">&lt;</span> <span class="n">np</span><span class="o">.</span><span class="n">inf</span><span class="p">]</span>
+
+    <span class="n">results</span> <span class="o">=</span> <span class="n">Results</span><span class="p">()</span>
+    <span class="n">results</span><span class="o">.</span><span class="n">pc</span> <span class="o">=</span> <span class="n">pcs</span>
+    <span class="n">results</span><span class="o">.</span><span class="n">snwp</span> <span class="o">=</span> <span class="n">snwp</span>
+    <span class="k">return</span> <span class="n">results</span>
+
+
+<div class="viewcode-block" id="satn_profile"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.metrics.satn_profile.html#porespy.metrics.satn_profile">[docs]</a><span class="k">def</span> <span class="nf">satn_profile</span><span class="p">(</span><span class="n">satn</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">im</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">span</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;tile&#39;</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Computes a saturation profile from an image of fluid invasion</span>
 
 <span class="sd">    Parameters</span>
@@ -1189,7 +1367,12 @@
 <span class="sd">        invasion.  0&#39;s are treated as solid and -1&#39;s are treated as uninvaded</span>
 <span class="sd">        void space.</span>
 <span class="sd">    s : scalar</span>
-<span class="sd">        The global saturation value for which the profile is desired</span>
+<span class="sd">        The global saturation value for which the profile is desired. If `satn` is</span>
+<span class="sd">        a pre-thresholded boolean image then this is ignored, `im` is required.</span>
+<span class="sd">    im : ndarray</span>
+<span class="sd">        A boolean image with `True` values indicating the void phase. This is used</span>
+<span class="sd">        to compute the void volume if `satn` is given as a pre-thresholded boolean</span>
+<span class="sd">        mask.</span>
 <span class="sd">    axis : int</span>
 <span class="sd">        The axis along which to profile should be measured</span>
 <span class="sd">    span : int</span>
@@ -1227,51 +1410,46 @@
 <span class="sd">    &lt;https://porespy.org/examples/metrics/reference/satn_profile.html&gt;`_</span>
 <span class="sd">    to view online example.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="c1"># @numba.njit()</span>
-    <span class="k">def</span> <span class="nf">func</span><span class="p">(</span><span class="n">satn</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">axis</span><span class="p">,</span> <span class="n">span</span><span class="p">,</span> <span class="n">mode</span><span class="p">):</span>
-        <span class="n">span</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">span</span><span class="p">)</span>
-        <span class="n">satn</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">swapaxes</span><span class="p">(</span><span class="n">satn</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">axis</span><span class="p">)</span>
-        <span class="k">if</span> <span class="n">mode</span> <span class="o">==</span> <span class="s1">&#39;tile&#39;</span><span class="p">:</span>
-            <span class="n">y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">satn</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">/</span><span class="n">span</span><span class="p">))</span>
-            <span class="n">z</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">y</span><span class="p">)</span>
-            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">satn</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">/</span><span class="n">span</span><span class="p">)):</span>
-                <span class="n">void</span> <span class="o">=</span> <span class="n">satn</span><span class="p">[</span><span class="n">i</span><span class="o">*</span><span class="n">span</span><span class="p">:(</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="n">span</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">!=</span> <span class="mi">0</span>
-                <span class="n">nwp</span> <span class="o">=</span> <span class="p">(</span><span class="n">satn</span><span class="p">[</span><span class="n">i</span><span class="o">*</span><span class="n">span</span><span class="p">:(</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="n">span</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">s</span><span class="p">)</span> \
-                    <span class="o">*</span><span class="p">(</span><span class="n">satn</span><span class="p">[</span><span class="n">i</span><span class="o">*</span><span class="n">span</span><span class="p">:(</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="n">span</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span>
-                <span class="n">y</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">nwp</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">/</span><span class="n">void</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
-                <span class="n">z</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">i</span><span class="o">*</span><span class="n">span</span> <span class="o">+</span> <span class="p">(</span><span class="n">span</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">/</span><span class="mi">2</span>
-        <span class="k">if</span> <span class="n">mode</span> <span class="o">==</span> <span class="s1">&#39;slide&#39;</span><span class="p">:</span>
-            <span class="n">y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">satn</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">-</span><span class="n">span</span><span class="p">))</span>
-            <span class="n">z</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">y</span><span class="p">)</span>
-            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">satn</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">-</span><span class="n">span</span><span class="p">)):</span>
-                <span class="n">void</span> <span class="o">=</span> <span class="n">satn</span><span class="p">[</span><span class="n">i</span><span class="p">:</span><span class="n">i</span><span class="o">+</span><span class="n">span</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">!=</span> <span class="mi">0</span>
-                <span class="n">nwp</span> <span class="o">=</span> <span class="p">(</span><span class="n">satn</span><span class="p">[</span><span class="n">i</span><span class="p">:</span><span class="n">i</span><span class="o">+</span><span class="n">span</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">s</span><span class="p">)</span><span class="o">*</span><span class="p">(</span><span class="n">satn</span><span class="p">[</span><span class="n">i</span><span class="p">:</span><span class="n">i</span><span class="o">+</span><span class="n">span</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span>
-                <span class="n">y</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">nwp</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">/</span><span class="n">void</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
-                <span class="n">z</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span> <span class="p">(</span><span class="n">span</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">/</span><span class="mi">2</span>
-        <span class="k">return</span> <span class="n">z</span><span class="p">,</span> <span class="n">y</span>
+    <span class="n">span</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">span</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">s</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">satn</span><span class="o">.</span><span class="n">dtype</span> <span class="o">!=</span> <span class="nb">bool</span><span class="p">:</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;Must specify a target saturation if saturation map is provided&#39;</span>
+            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="n">s</span> <span class="o">=</span> <span class="mi">2</span>  <span class="c1"># Will find ALL voxels, then &gt; 0 will limit to only True ones</span>
+        <span class="n">satn</span> <span class="o">=</span> <span class="n">satn</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+        <span class="n">satn</span><span class="p">[</span><span class="n">satn</span> <span class="o">==</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span>
+        <span class="n">satn</span><span class="p">[</span><span class="o">~</span><span class="n">im</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">msg</span> <span class="o">=</span> <span class="s1">&#39;The maximum saturation in the image is less than the given threshold&#39;</span>
+        <span class="k">if</span> <span class="n">satn</span><span class="o">.</span><span class="n">max</span><span class="p">()</span> <span class="o">&lt;</span> <span class="n">s</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
 
-    <span class="n">z</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">func</span><span class="p">(</span><span class="n">satn</span><span class="o">=</span><span class="n">satn</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="n">s</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="n">axis</span><span class="p">,</span> <span class="n">span</span><span class="o">=</span><span class="n">span</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="n">mode</span><span class="p">)</span>
-
-    <span class="k">class</span> <span class="nc">results</span><span class="p">(</span><span class="n">Results</span><span class="p">):</span>
-        <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
-
-<span class="sd">        Attributes</span>
-<span class="sd">        ----------</span>
-<span class="sd">        position : ndarray</span>
-<span class="sd">            The position along the given axis at which saturation values are</span>
-<span class="sd">            computed.  The units are in voxels.</span>
-<span class="sd">        saturation : ndarray</span>
-<span class="sd">            The computed saturation value at each position</span>
-
-<span class="sd">        &quot;&quot;&quot;</span>
-        <span class="n">position</span> <span class="o">=</span> <span class="n">z</span>
-        <span class="n">saturation</span> <span class="o">=</span> <span class="n">y</span>
-
+    <span class="n">satn</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">swapaxes</span><span class="p">(</span><span class="n">satn</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">axis</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">mode</span> <span class="o">==</span> <span class="s1">&#39;tile&#39;</span><span class="p">:</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">satn</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">/</span><span class="n">span</span><span class="p">))</span>
+        <span class="n">z</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">y</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">satn</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">/</span><span class="n">span</span><span class="p">)):</span>
+            <span class="n">void</span> <span class="o">=</span> <span class="n">satn</span><span class="p">[</span><span class="n">i</span><span class="o">*</span><span class="n">span</span><span class="p">:(</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="n">span</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">!=</span> <span class="mi">0</span>
+            <span class="n">nwp</span> <span class="o">=</span> <span class="p">(</span><span class="n">satn</span><span class="p">[</span><span class="n">i</span><span class="o">*</span><span class="n">span</span><span class="p">:(</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="n">span</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">s</span><span class="p">)</span> \
+                <span class="o">*</span><span class="p">(</span><span class="n">satn</span><span class="p">[</span><span class="n">i</span><span class="o">*</span><span class="n">span</span><span class="p">:(</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="n">span</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="n">y</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">nwp</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span><span class="o">/</span><span class="n">void</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+            <span class="n">z</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">i</span><span class="o">*</span><span class="n">span</span> <span class="o">+</span> <span class="p">(</span><span class="n">span</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">/</span><span class="mi">2</span>
+    <span class="k">if</span> <span class="n">mode</span> <span class="o">==</span> <span class="s1">&#39;slide&#39;</span><span class="p">:</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">satn</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">-</span><span class="n">span</span><span class="p">))</span>
+        <span class="n">z</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">y</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">satn</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">-</span><span class="n">span</span><span class="p">)):</span>
+            <span class="n">void</span> <span class="o">=</span> <span class="n">satn</span><span class="p">[</span><span class="n">i</span><span class="p">:</span><span class="n">i</span><span class="o">+</span><span class="n">span</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">!=</span> <span class="mi">0</span>
+            <span class="n">nwp</span> <span class="o">=</span> <span class="p">(</span><span class="n">satn</span><span class="p">[</span><span class="n">i</span><span class="p">:</span><span class="n">i</span><span class="o">+</span><span class="n">span</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">s</span><span class="p">)</span><span class="o">*</span><span class="p">(</span><span class="n">satn</span><span class="p">[</span><span class="n">i</span><span class="p">:</span><span class="n">i</span><span class="o">+</span><span class="n">span</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="n">y</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">nwp</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span><span class="o">/</span><span class="n">void</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+            <span class="n">z</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span> <span class="p">(</span><span class="n">span</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">/</span><span class="mi">2</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="n">Results</span><span class="p">()</span>
+    <span class="n">results</span><span class="o">.</span><span class="n">position</span> <span class="o">=</span> <span class="n">z</span>
+    <span class="n">results</span><span class="o">.</span><span class="n">saturation</span> <span class="o">=</span> <span class="n">y</span>
     <span class="k">return</span> <span class="n">results</span></div>
 
 
-<div class="viewcode-block" id="find_h"><a class="viewcode-back" href="../../../modules/generated/porespy.metrics.find_h.html#porespy.metrics.find_h">[docs]</a><span class="k">def</span> <span class="nf">find_h</span><span class="p">(</span><span class="n">saturation</span><span class="p">,</span> <span class="n">position</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">srange</span><span class="o">=</span><span class="p">[</span><span class="mf">0.01</span><span class="p">,</span> <span class="mf">0.99</span><span class="p">]):</span>
-    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="find_h"><a class="viewcode-back" href="../../../modules/generated/generated/porespy.metrics.find_h.html#porespy.metrics.find_h">[docs]</a><span class="k">def</span> <span class="nf">find_h</span><span class="p">(</span><span class="n">saturation</span><span class="p">,</span> <span class="n">position</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">srange</span><span class="o">=</span><span class="p">[</span><span class="mf">0.01</span><span class="p">,</span> <span class="mf">0.99</span><span class="p">]):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Given a saturation profile, compute the height between given bounds</span>
 
 <span class="sd">    Parameters</span>
@@ -1355,13 +1533,13 @@
   
   <div class="footer-item">
     <p class="copyright">
-    &copy; Copyright 2022, PMEAL.<br>
+    &copy; Copyright 2023, PMEAL.<br>
 </p>
   </div>
   
   <div class="footer-item">
     <p class="sphinx-version">
-Created using <a href="http://sphinx-doc.org/">Sphinx</a> 4.5.0.<br>
+Created using <a href="http://sphinx-doc.org/">Sphinx</a> 5.3.0.<br>
 </p>
   </div>
   
