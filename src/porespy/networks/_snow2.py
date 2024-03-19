@@ -199,6 +199,12 @@ def snow2(
         vals = vals[vals > 0]
     if peaks is not None:
         parallelization = None
+    for i in vals:
+        phase = phases == i
+        overlap, chunk = estimate_overlap_and_chunk(phase)
+        if (overlap>(chunk//2-1)).any():
+            parallelization = None
+            logger.warning("Disabling paralelization as overlap is bigger than chunk size.")
     regions = None
     for i in vals:
         logger.info(f"Processing phase {i}...")
