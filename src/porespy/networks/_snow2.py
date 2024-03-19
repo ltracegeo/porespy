@@ -204,9 +204,7 @@ def snow2(
         parallel_kw = None
     regions = None
     for i in vals:
-        logger.info(f"Processing phase {i}...")
         phase = phases == i
-        pk = None if peaks is None else peaks*phase
         overlap, chunk = estimate_overlap_and_chunk(phase)
         # TODO: this may not be the overlap the user provides!
         if (overlap > (chunk//2 - 1)).any():
