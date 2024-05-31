@@ -30,7 +30,7 @@ from ._funcs import label_phases
 from ._funcs import label_boundaries
 from ._funcs import map_to_regions
 from ._maximal_ball import maximal_ball_wrapper
-from ._getnet import regions_to_network
+from ._getnet import regions_to_network, _jit_regions_to_network
 from ._snow2 import snow2
 from ._utils import _net_dict
 from ._snow2 import _parse_pad_width

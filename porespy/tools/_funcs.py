@@ -5,12 +5,16 @@ from skimage.segmentation import relabel_sequential
 import pyedt
 from loguru import logger
 from skimage.morphology import ball, disk
+from numba import njit, boolean
+
 from ._utils import Results
 from ._unpad import unpad
 try:
     from skimage.measure import marching_cubes
 except ImportError:
     from skimage.measure import marching_cubes_lewiner as marching_cubes
+
+from numba import njit
 
 
 __all__ = [
@@ -568,6 +572,29 @@ def extend_slice(slices, shape, pad=1):
         stop = min(s.stop + pad[i], shape[i])
         a.append(slice(start, stop, None))
     return tuple(a)
+
+@njit
+def jit_extend_slice(slices, shape, pad=1):
+    shape = np.array(shape)
+    a = []
+    for i, s in enumerate(slices):
+        start = max(s.start - pad, 0)
+        stop = min(s.stop + pad, shape[i])
+        a.append(slice(start, stop, None))
+    return (a[0], a[1], a[2])
+
+@njit
+def pad(img):
+    """
+    Assumes pad width=1 and mode is constant = 0
+    """
+    w, h, d = img.shape
+    output = np.zeros((w+2, h+2, d+2), dtype=boolean)
+    for x in range(w):
+        for y in range(h):
+            for z in range(d):
+                output[x+1, y+1, z+1] = img[x, y, z]
+    return output
 
 
 def randomize_colors(im, keep_vals=[0]):
@@ -1281,3 +1308,26 @@ def _check_for_singleton_axes(im):  # pragma: no cover
         logger.warning("Input image conains a singleton axis. Reduce"
                        " dimensionality with np.squeeze(im) to avoid"
                        " unexpected behavior.")
+
+@njit
+def center_of_mass(im):
+    w, h, d = im.shape
+    x_sum = y_sum = z_sum = np.int32(0)
+    x_mass = y_mass = z_mass = np.float32(0.)
+    for x in range(w):
+        for y in range(h):
+            for z in range(d):
+                val = im[x, y, z]
+                x_sum += val
+                y_sum += val
+                z_sum += val
+                x_mass += x * val
+                y_mass += y * val
+                z_mass += z * val
+
+    return np.array((
+        x_mass/x_sum,
+        y_mass/y_sum,
+        z_mass/z_sum,
+        ))
+

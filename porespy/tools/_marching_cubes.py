@@ -169,16 +169,20 @@ def calculate_area_and_volume(
     spacing=(1, 1, 1),
     template_areas=None,
     template_volumes=None,
+    debug=False,
 ):
     w, h, d = img.shape
     area = 0.0
     volume = 0.0
 
+    if debug: print("Shape: ", w, h, d)
+
     for x in range(w - 1):
         for y in range(h - 1):
             for z in range(d - 1):
+                if debug: print(x, y, z)
                 sub_array = img[x : x + 2, y : y + 2, z : z + 2]
-
+                
                 if target_label not in sub_array:
                     continue
 
@@ -216,3 +220,33 @@ def marching_cubes_area_and_volume(
     )
 
     return area, volume
+
+@njit
+def jit_marching_cubes_area_and_volume(
+    img,
+    target_label=1,
+    spacing=(1, 1, 1),
+    template_areas=None,
+    template_volumes=None,
+    debug=False,
+):
+
+    vertex_index_array = np.array(
+        [[[  1,  16],
+        [  4,  64]],
+        [[  2,  32],
+        [  8, 128]]], 
+        dtype=np.int32
+    )
+
+    area, volume = calculate_area_and_volume(
+        img,
+        vertex_index_array,
+        target_label=target_label,
+        spacing=spacing,
+        template_areas=template_areas,
+        template_volumes=template_volumes,
+        debug=debug,
+    )
+
+    return area/2, volume
