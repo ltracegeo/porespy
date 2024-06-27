@@ -1,5 +1,6 @@
 import logging
 
+import pyedt
 import numba
 import numpy as np
 import scipy.ndimage as spim
@@ -218,7 +219,7 @@ def regions_to_network_parallel(
     if im.size != phases.size:
         raise Exception('regions and phase are different sizes, probably ' +
                         'because boundary regions were not added to phases')
-    dt = edt(phases >= 1, scale=voxel_size)
+    dt = pyedt.edt(phases >= 1, scale=voxel_size, sqrt_result=True)
 
     # Get 'slices' into im for each pore region
     slices = spim.find_objects(im)
