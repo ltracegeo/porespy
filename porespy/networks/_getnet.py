@@ -537,6 +537,8 @@ def _jit_regions_to_network_parallel(
                     if worker_status[worker_id] == DONE:
                         
                         for throat_i in range(len(partial_t_conns_0[worker_id])):
+                            if partial_t_area[worker_id][throat_i] == 0 or partial_t_perimeter[worker_id][throat_i] == 0:
+                                continue
                             t_conns_0.append(partial_t_conns_0[worker_id][throat_i])
                             t_conns_1.append(partial_t_conns_1[worker_id][throat_i])
                             t_dia_inscribed.append(partial_t_dia_inscribed[worker_id][throat_i])
@@ -611,15 +613,17 @@ def _jit_regions_to_network_parallel(
                     Pn, inscribed_diameter, areas, perimeters, centers = _get_throats(pore_im, sub_im, sub_dt, voxel_size)
                     for j in Pn:
                         if j > pore:
+                            if areas[j] == 0 or perimeters[j] == 0:
+                                continue
 
                             partial_t_conns_0[self_id].append(pore)
                             partial_t_conns_1[self_id].append(j)
                             partial_t_dia_inscribed[self_id].append(inscribed_diameter[j])
                             partial_t_perimeter[self_id].append(perimeters[j])
                             partial_t_area[self_id].append(areas[j])
-                            partial_t_coords_0[self_id].append(centers[j][0] + s_offset[0])
-                            partial_t_coords_1[self_id].append(centers[j][1] + s_offset[1])
-                            partial_t_coords_2[self_id].append(centers[j][2] + s_offset[2])
+                            partial_t_coords_0[self_id].append(centers[j][0] + s_offset[0]*voxel_size[0])
+                            partial_t_coords_1[self_id].append(centers[j][1] + s_offset[1]*voxel_size[1])
+                            partial_t_coords_2[self_id].append(centers[j][2] + s_offset[2]*voxel_size[2])
 
                     
                     worker_status[self_id] = DONE
