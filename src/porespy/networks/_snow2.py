@@ -3,6 +3,7 @@ import logging
 from porespy.tools import Results
 from porespy.networks import (
     regions_to_network,
+    regions_to_network_parallel,
     add_boundary_regions,
     label_phases,
     label_boundaries,
@@ -57,6 +58,7 @@ def snow2(
     peaks=None,
     porosity_map=None,
     parallelization={},
+    parallel_extraction=False,
 ):
     r"""
     Applies the SNOW algorithm to each phase indicated in ``phases``.
@@ -199,15 +201,17 @@ def snow2(
         vals = vals[vals > 0]
     if peaks is not None:
         parallelization = None
+    for i in vals:
+        phase = phases == i
+        overlap, chunk = estimate_overlap_and_chunk(phase)
+        if (overlap > (chunk//2 - 1)).any():
+            parallelization = None
+            logger.warning("Disabling paralelization as overlap exceeds than chunk size.")
     regions = None
     for i in vals:
         logger.info(f"Processing phase {i}...")
         phase = phases == i
         pk = None if peaks is None else peaks*phase
-        overlap, chunk = estimate_overlap_and_chunk(phase)
-        if (overlap > (chunk//2 - 1)).any():
-            parallelization = None
-            logger.warning("Disabling paralelization as overlap exceeds than chunk size.")
         if parallelization is not None:
             snow = snow_partitioning_parallel(
                 im=phase,
@@ -239,13 +243,22 @@ def snow2(
         if porosity_map is not None:
             porosity_map = np.pad(porosity_map, pad_width=boundary_width, mode='edge')
     # Perform actual extractcion on all regions
-    net = regions_to_network(
-        regions,
-        phases=phases,
-        accuracy=accuracy,
-        voxel_size=voxel_size,
-        porosity_map=porosity_map,
-    )
+    if parallel_extraction:
+        net = regions_to_network_parallel(
+            regions,
+            phases=phases,
+            accuracy=accuracy,
+            voxel_size=voxel_size,
+            porosity_map=porosity_map,
+        )
+    else:
+        net = regions_to_network(
+            regions,
+            phases=phases,
+            accuracy=accuracy,
+            voxel_size=voxel_size,
+            porosity_map=porosity_map,
+        )
     # If image is multiphase, label pores/throats accordingly
     if phases.max() > 1:
         phase_alias = _parse_phase_alias(phase_alias, phases)
