@@ -4,11 +4,13 @@ import numpy as np
 
 from porespy.filters import snow_partitioning, snow_partitioning_parallel
 from porespy.tools import Results, get_edt
+from porespy.networks import regions_to_network_parallel
 
 from ._funcs import add_boundary_regions, label_boundaries, label_phases
 from ._getnet_orig import regions_to_network
 
 __all__ = ["snow2", "_parse_pad_width"]
+
 
 
 edt = get_edt()
@@ -46,6 +48,7 @@ def snow2(
     peaks=None,
     porosity_map=None,
     parallel_kw={},
+    parallel_extraction=False,
 ):
     r"""
     Applies the SNOW algorithm to each phase indicated in ``phases``.
@@ -240,13 +243,22 @@ def snow2(
         if porosity_map is not None:
             porosity_map = np.pad(porosity_map, pad_width=boundary_width, mode='edge')
     # Perform actual extractcion on all regions
-    net = regions_to_network(
-        regions,
-        phases=phases,
-        accuracy=accuracy,
-        voxel_size=voxel_size,
-        porosity_map=porosity_map,
-    )
+    if parallel_extraction:
+        net = regions_to_network_parallel(
+            regions,
+            phases=phases,
+            accuracy=accuracy,
+            voxel_size=voxel_size,
+            porosity_map=porosity_map,
+        )
+    else:
+        net = regions_to_network(
+            regions,
+            phases=phases,
+            accuracy=accuracy,
+            voxel_size=voxel_size,
+            porosity_map=porosity_map,
+        )
     # If image is multiphase, label pores/throats accordingly
     if phases.max() > 1:
         phase_alias = _parse_phase_alias(phase_alias, phases)
