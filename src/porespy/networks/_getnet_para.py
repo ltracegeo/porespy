@@ -200,10 +200,7 @@ def regions_to_network_parallel(
     to view online example.
 
     """
-    if edt_import_status is not None:
-        raise edt_import_status
-
-    logger.trace('Extracting pore/throat information')
+    logger.info('Extracting pore/throat information')
     template_areas, template_volumes = create_mc_template_list(spacing=voxel_size)
     vertex_index_array = np.array([2**i for i in range(8)])
     vertex_index_array = vertex_index_array.reshape((2, 2, 2), order="F")
