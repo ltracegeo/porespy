@@ -1,6 +1,7 @@
 import logging
 import numpy as np
 import scipy.ndimage as spim
+import scipy.spatial
 from skimage.morphology import disk, ball
 from edt import edt
 from porespy.tools import extend_slice
@@ -8,7 +9,7 @@ from porespy import settings
 from porespy.tools import get_tqdm, make_contiguous
 from porespy.metrics import region_surface_areas, region_interface_areas
 from porespy.metrics import region_volumes
-
+from concave_hull import concave_hull, concave_hull_indexes
 
 __all__ = [
     "regions_to_network",
@@ -18,6 +19,51 @@ __all__ = [
 tqdm = get_tqdm()
 logger = logging.getLogger(__name__)
 
+def compute_feret_and_normal(points):
+    centroid = np.mean(points, axis=0)
+
+    # hull = scipy.spatial.ConvexHull(points)
+    # hull_points = points[hull.vertices]
+
+    idxes = concave_hull_indexes(points, concavity=2.0)
+    hull_points = points[idxes]
+
+    dists = scipy.spatial.distance.cdist(hull_points, [centroid])
+
+    i = np.argmax(dists)
+    max_feret = hull_points[i] - centroid
+
+    i = np.argmin(dists)
+    min_feret = hull_points[i] - centroid
+
+    normal = np.cross(max_feret, min_feret)
+    norm = np.linalg.norm(normal)
+
+    return min_feret, max_feret, normal / norm
+
+def project_points(points, normal, max_feret):
+    centroid = np.mean(points, axis=0)
+
+    u = max_feret
+    v = np.cross(normal, u)
+    u = np.cross(v, normal)
+    u /= np.linalg.norm(u)
+    v /= np.linalg.norm(v)
+
+    projected_2d = np.array([[np.dot(p - centroid, u), np.dot(p - centroid, v)] for p in points])
+    return projected_2d
+
+def compute_area_perimeter(points_2d):
+    idxes = concave_hull_indexes(points_2d, concavity=2.0)
+    hull_points = points_2d[idxes]
+
+    area = 0.5 * np.abs(np.dot(hull_points[:, 0], np.roll(hull_points[:, 1], 1)) - np.dot(hull_points[:, 1], np.roll(hull_points[:, 0], 1)))
+    area += 0.5 * np.abs(np.dot(hull_points[-1, 0], hull_points[0, 1]) - np.dot(hull_points[-1, 1], hull_points[0, 0]))
+
+    perimeter = np.sum(np.linalg.norm(np.diff(hull_points, axis=0), axis=1))
+    perimeter += np.linalg.norm(hull_points[0] - hull_points[-1])
+
+    return area, perimeter
 
 def regions_to_network(
     regions,
@@ -163,6 +209,7 @@ def regions_to_network(
     p_label = np.zeros((Np, ), dtype=int)
     p_area_surf = np.zeros((Np, ), dtype=int)
     p_phase = np.zeros((Np, ), dtype=int)
+    p_porosity = np.ones((Np, ), dtype=float)
     # The number of throats is not known at the start, so lists are used
     # which can be dynamically resized more easily.
     t_conns = []
@@ -234,6 +281,7 @@ def regions_to_network(
     net['pore.region_volume'] = V  # This will be an area if image is 2D
     f = 3/4 if ND == 3 else 1.0
     net['pore.equivalent_diameter'] = 2*(V/np.pi * f)**(1/ND)
+    net['pore.subresolution_porosity'] = p_porosity
     # Extract the geometric stuff
     net['pore.local_peak'] = np.copy(p_coords_dt)*voxel_size
     net['pore.global_peak'] = np.copy(p_coords_dt_global)*voxel_size
@@ -261,10 +309,14 @@ def regions_to_network(
         net['pore.volume'] = region_volumes(regions=im, mode='marching_cubes')
         areas = region_surface_areas(regions=im, voxel_size=voxel_size)
         net['pore.surface_area'] = areas
-        interface_area = region_interface_areas(regions=im, areas=areas,
-                                                voxel_size=voxel_size)
-        A = interface_area.area
-        net['throat.cross_sectional_area'] = A
+
+        points = np.array(vx).T
+        min_feret, max_feret, normal = compute_feret_and_normal(points)
+        projected_points = project_points(points, normal, max_feret)
+        area, perimeter = compute_area_perimeter(projected_points)
+
+        net['throat.cross_sectional_area'] = area
+        net['throat.perimeter'] = perimeter
         net['throat.equivalent_diameter'] = (4*A/np.pi)**(1/2)
     else:
         net['pore.volume'] = np.copy(p_volume)*(voxel_size**ND)
