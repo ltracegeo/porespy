@@ -39,6 +39,7 @@ dependencies = [
     "tqdm",
     "pywavelets",
     "setuptools",
+    "concave_hull",
 ]
 readme = "README.md"
 requires-python = ">= 3.8"
