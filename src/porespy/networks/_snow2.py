@@ -123,9 +123,11 @@ def snow2(
     r_max : int
         The radius of the spherical structuring element to use in the
         Maximum filter stage that is used to find peaks. The default is 4.
-    sigma : float
+    sigma : float or dict
         The standard deviation of the Gaussian filter used in step 1. The
-        default is 0.4.  If 0 is given then the filter is not applied.
+        default is 0.4.  If 0 is given then the filter is not applied. If
+        float, is applied equally to all phases, otherwise, must be a dict
+        with a key for each phase index.
     peaks : ndarray, optional
         Optionally, it is possible to supply an array containing peaks, which
         are used as markers in the watershed segmentation. If a boolean array
@@ -207,6 +209,7 @@ def snow2(
     """
     # Parallel snow does not accept peaks, so if they are provided,
     # disable parallelization
+    
     phases = phases.astype(int)
     if phase_alias is not None:
         vals = phase_alias.keys()
@@ -221,6 +224,11 @@ def snow2(
         if (overlap > (chunk//2 - 1)).any():
             parallelization = None
             logger.warning("Disabling paralelization as overlap exceeds than chunk size.")
+    if type(sigma) is not dict:
+        sigma_dict = {}
+        for i in vals:
+            sigma_dict[i] = sigma
+        sigma = sigma_dict
     regions = None
     for i in vals:
         logger.info(f"Processing phase {i}...")
@@ -229,12 +237,12 @@ def snow2(
         if parallelization is not None:
             snow = snow_partitioning_parallel(
                 im=phase,
-                sigma=sigma,
+                sigma=sigma[i],
                 r_max=r_max,
                 parallel_kw=parallel_kw,
             )
         else:
-            snow = snow_partitioning(im=phase, sigma=sigma, r_max=r_max,
+            snow = snow_partitioning(im=phase, sigma=sigma[i], r_max=r_max,
                                      peaks=pk)
         if regions is None:
             regions = np.zeros_like(snow.regions, dtype=int)
