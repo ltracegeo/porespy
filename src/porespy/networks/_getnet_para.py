@@ -100,6 +100,7 @@ def regions_to_network_parallel(
     accuracy='standard',
     porosity_map=None,
     threads=None,
+    force_cpu=False,
 ):
     r"""
     Analyzes an image that has been partitioned into pore regions and extracts
@@ -221,7 +222,10 @@ def regions_to_network_parallel(
     if im.size != phases.size:
         raise Exception('regions and phase are different sizes, probably ' +
                         'because boundary regions were not added to phases')
-    dt = edt(phases >= 1, scale=voxel_size)
+    if force_cpu:
+        dt = jit_edt_cpu(phases >= 1, scale=voxel_size)
+    else:
+        dt = edt(phases >= 1, scale=voxel_size)
 
     # Get 'slices' into im for each pore region
     slices = spim.find_objects(im)
