@@ -76,6 +76,20 @@ def get_edt():
         edt = partial(edt, parallel=Settings().ncores)
         return edt
 
+def get_jit_edt_cpu():
+    try:
+        package = importlib.import_module("pyedt")
+        return package.jit_edt_cpu
+    except ModuleNotFoundError:
+        return None
+
+def get_edt_cpu():
+    try:
+        package = importlib.import_module("pyedt")
+        return package.edt_cpu
+    except ModuleNotFoundError:
+        return None
+
 
 def _format_time(timespan, precision=3):
     """Formats the timespan in a human readable form"""

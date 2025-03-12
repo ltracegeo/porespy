@@ -3,7 +3,7 @@ import logging
 import numpy as np
 
 from porespy.filters import snow_partitioning, snow_partitioning_parallel
-from porespy.tools import Results, get_edt
+from porespy.tools import Results, get_edt, get_jit_edt_cpu
 from porespy.networks import regions_to_network_parallel
 
 from ._funcs import add_boundary_regions, label_boundaries, label_phases
@@ -12,12 +12,12 @@ from ._getnet_orig import regions_to_network
 __all__ = ["snow2", "_parse_pad_width"]
 
 
-
 edt = get_edt()
+jit_edt_cpu = get_jit_edt_cpu()
 logger = logging.getLogger(__name__)
 
 
-def estimate_overlap_and_chunk(im):
+def estimate_overlap_and_chunk(im, dt=None):
     divs = [2 for i in range(im.ndim)]
 
     shape = []
@@ -31,7 +31,8 @@ def estimate_overlap_and_chunk(im):
             im = im.swapaxes(i, 0)
 
     chunk_shape = (np.array(shape) / np.array(divs)).astype(int)
-    dt = edt((im > 0))
+    if dt is None:
+        dt = edt((im > 0))
     overlap = dt.max()
 
     return overlap, chunk_shape
@@ -49,6 +50,7 @@ def snow2(
     porosity_map=None,
     parallel_kw={},
     parallel_extraction=False,
+    force_cpu=False,
 ):
     r"""
     Applies the SNOW algorithm to each phase indicated in ``phases``.
@@ -206,30 +208,50 @@ def snow2(
     else:
         vals = np.unique(phases)
         vals = vals[vals > 0]
+    if peaks is not None:
+        parallel_kw = None
+    for i in vals:
+        phase = phases == i
+        if force_cpu:
+            phase_dt = jit_edt_cpu(phase)
+        else:
+            phase_dt = None
+        overlap, chunk = estimate_overlap_and_chunk(phase, dt=phase_dt)
+        # TODO: this may not be the overlap the user provides!
+        if (overlap > (chunk//2 - 1)).any():
+            parallel_kw = None
+            logger.warning("Disabling paralelization as overlap exceeds than chunk size.")
     if type(sigma) is not dict:
         sigma_dict = {}
         for i in vals:
             sigma_dict[i] = sigma
         sigma = sigma_dict
-    if peaks is not None:
-        parallel_kw = None
     regions = None
     for i in vals:
+        logger.info(f"Processing phase {i}...")
         phase = phases == i
-        overlap, chunk = estimate_overlap_and_chunk(phase)
-        # TODO: this may not be the overlap the user provides!
-        if (overlap > (chunk//2 - 1)).any():
-            parallel_kw = None
-            logger.warning("Disabling paralelization as overlap exceeds than chunk size.")
+        pk = None if peaks is None else peaks*phase
+        if force_cpu:
+            dt = jit_edt_cpu(phase)
+        else:
+            dt = None
         if parallel_kw is not None:
             snow = snow_partitioning_parallel(
                 im=phase,
                 sigma=sigma[i],
                 r_max=r_max,
                 parallel_kw=parallel_kw,
+                overlap=overlap,
+                dt=dt,
             )
         else:
-            snow = snow_partitioning(im=phase, sigma=sigma[i], r_max=r_max)
+            snow = snow_partitioning(
+                im=phase,
+                dt=dt,
+                sigma=sigma[i], 
+                r_max=r_max,
+                peaks=pk,
+                )
         if regions is None:
             regions = np.zeros_like(snow.regions, dtype=int)
         # Note: Using snow.regions > 0 here instead of phase is needed to

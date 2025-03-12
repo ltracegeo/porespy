@@ -1,8 +1,7 @@
 import numpy as np
 from skimage.morphology import footprint_rectangle
 
-from ._utils import get_edt
-
+from ._utils import get_edt, get_edt_cpu
 __all__ = [
     'get_strel',
     'ball',
@@ -17,6 +16,7 @@ __all__ = [
 
 
 edt = get_edt()
+edt_cpu = get_edt_cpu()
 
 
 def ball(r):
@@ -137,9 +137,9 @@ def ps_round(r, ndim, smooth=True):
     other = np.ones([2*rad + 1 for i in range(ndim)], dtype=bool)
     other[tuple(rad for i in range(ndim))] = False
     if smooth:
-        ball = edt(other) < r
+        ball = edt_cpu(other) < r
     else:
-        ball = edt(other) <= r
+        ball = edt_cpu(other) <= r
     return ball
 
 
