@@ -14,6 +14,13 @@ try:
     from skimage.measure import marching_cubes
 except ImportError:
     from skimage.measure import marching_cubes_lewiner as marching_cubes
+try:
+    from pyedt import edt, edt_cpu
+except ModuleNotFoundError:
+    from edt import edt
+
+
+logger = logging.getLogger(__name__)
 
 
 __all__ = [
@@ -1427,6 +1434,131 @@ def mesh_region(region: bool, strel=None, voxel_size=(1.0, 1.0, 1.0)):
     result.norm = norm
     result.val = val
     return result
+
+
+def ps_disk(r, smooth=True):
+    r"""
+    Creates circular disk structuring element for morphological operations
+
+    Parameters
+    ----------
+    r : float or int
+        The desired radius of the structuring element
+    smooth : boolean
+        Indicates whether the faces of the sphere should have the little
+        nibs (``True``) or not (``False``, default)
+
+    Returns
+    -------
+    disk : ndarray
+        A 2D numpy bool array of the structring element
+
+    Examples
+    --------
+    `Click here
+    <https://porespy.org/examples/tools/reference/ps_disk.html>`_
+    to view online example.
+
+    """
+    disk = ps_round(r=r, ndim=2, smooth=smooth)
+    return disk
+
+
+def ps_ball(r, smooth=True):
+    r"""
+    Creates spherical ball structuring element for morphological operations
+
+    Parameters
+    ----------
+    r : scalar
+        The desired radius of the structuring element
+    smooth : boolean
+        Indicates whether the faces of the sphere should have the little
+        nibs (``True``) or not (``False``, default)
+
+    Returns
+    -------
+    ball : ndarray
+        A 3D numpy array of the structuring element
+
+    Examples
+    --------
+    `Click here
+    <https://porespy.org/examples/tools/reference/ps_ball.html>`_
+    to view online example.
+
+    """
+    ball = ps_round(r=r, ndim=3, smooth=smooth)
+    return ball
+
+
+def ps_round(r, ndim, smooth=True):
+    r"""
+    Creates round structuring element with the given radius and dimensionality
+
+    Parameters
+    ----------
+    r : scalar
+        The desired radius of the structuring element
+    ndim : int
+        The dimensionality of the element, either 2 or 3.
+    smooth : boolean
+        Indicates whether the faces of the sphere should have the little
+        nibs (``True``) or not (``False``, default)
+
+    Returns
+    -------
+    strel : ndarray
+        A 3D numpy array of the structuring element
+
+    Examples
+    --------
+    `Click here
+    <https://porespy.org/examples/tools/reference/ps_round.html>`_
+    to view online example.
+
+    """
+    rad = int(np.ceil(r))
+    other = np.ones([2*rad + 1 for i in range(ndim)], dtype=bool)
+    other[tuple(rad for i in range(ndim))] = False
+    if smooth:
+        ball = edt_cpu(other) < r
+    else:
+        ball = edt_cpu(other) <= r
+    return ball
+
+
+def ps_rect(w, ndim):
+    r"""
+    Creates rectilinear structuring element with the given size and
+    dimensionality
+
+    Parameters
+    ----------
+    w : scalar
+        The desired width of the structuring element
+    ndim : int
+        The dimensionality of the element, either 2 or 3.
+
+    Returns
+    -------
+    strel : D-aNrray
+        A numpy array of the structuring element
+
+    Examples
+    --------
+    `Click here
+    <https://porespy.org/examples/tools/reference/ps_rect.html>`_
+    to view online example.
+
+    """
+    if ndim == 2:
+        from skimage.morphology import square
+        strel = square(w)
+    if ndim == 3:
+        from skimage.morphology import cube
+        strel = cube(w)
+    return strel
 
 
 def overlay(im1, im2, c):
