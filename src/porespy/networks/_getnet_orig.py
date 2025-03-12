@@ -134,6 +134,7 @@ def regions_to_network(
     to view online example.
 
     """
+
     logger.info('Extracting pore/throat information')
 
     im = make_contiguous(regions)

@@ -13,7 +13,7 @@ from porespy.filters import (
     snow_partitioning_parallel,
 )
 try:
-    from pyedt import edt
+    from pyedt import edt, jit_edt_cpu
 except ModuleNotFoundError:
     from edt import edt
 
@@ -27,7 +27,7 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-def estimate_overlap_and_chunk(im):
+def estimate_overlap_and_chunk(im, dt=None):
     divs = [2 for i in range(im.ndim)]
 
     shape = []
@@ -41,7 +41,8 @@ def estimate_overlap_and_chunk(im):
             im = im.swapaxes(i, 0)
 
     chunk_shape = (np.array(shape) / np.array(divs)).astype(int)
-    dt = edt((im > 0))
+    if dt is None:
+        dt = edt((im > 0))
     overlap = dt.max()
 
     return overlap, chunk_shape
@@ -59,6 +60,7 @@ def snow2(
     porosity_map=None,
     parallelization={},
     parallel_extraction=False,
+    force_cpu=False,
 ):
     r"""
     Applies the SNOW algorithm to each phase indicated in ``phases``.
@@ -206,10 +208,14 @@ def snow2(
         parallelization = None
     for i in vals:
         phase = phases == i
-        overlap, chunk = estimate_overlap_and_chunk(phase)
+        if force_cpu:
+            phase_dt = jit_edt_cpu(phase)
+        else:
+            phase_dt = None
+        overlap, chunk = estimate_overlap_and_chunk(phase, dt=phase_dt)
         if (overlap > (chunk//2 - 1)).any():
             parallelization = None
-            logger.warning("Disabling paralelization as overlap exceeds than chunk size.")
+            logger.warning("Disabling paralelization as overlap exceeds chunk size.")
     if type(sigma) is not dict:
         sigma_dict = {}
         for i in vals:
@@ -220,6 +226,10 @@ def snow2(
         logger.info(f"Processing phase {i}...")
         phase = phases == i
         pk = None if peaks is None else peaks*phase
+        if force_cpu:
+            dt = jit_edt_cpu(phase)
+        else:
+            dt = None
         if parallelization is not None:
             snow = snow_partitioning_parallel(
                 im=phase,
@@ -227,10 +237,16 @@ def snow2(
                 r_max=r_max,
                 overlap=overlap,
                 **parallelization,
+                dt=dt,
             )
         else:
-            snow = snow_partitioning(im=phase, sigma=sigma[i], r_max=r_max,
-                                     peaks=pk)
+            snow = snow_partitioning(
+                im=phase,
+                dt=dt,
+                sigma=sigma[i], 
+                r_max=r_max,
+                peaks=pk,
+                )
         if regions is None:
             regions = np.zeros_like(snow.regions, dtype=int)
         # Note: Using snow.regions > 0 here instead of phase is needed to

@@ -10,7 +10,7 @@ try:
 except ImportError:
     from skimage.measure import marching_cubes_lewiner as marching_cubes
 try:
-    from pyedt import edt
+    from pyedt import edt, edt_cpu
 except ModuleNotFoundError:
     from edt import edt
 
@@ -1184,9 +1184,9 @@ def ps_round(r, ndim, smooth=True):
     other = np.ones([2*rad + 1 for i in range(ndim)], dtype=bool)
     other[tuple(rad for i in range(ndim))] = False
     if smooth:
-        ball = edt(other) < r
+        ball = edt_cpu(other) < r
     else:
-        ball = edt(other) <= r
+        ball = edt_cpu(other) <= r
     return ball
 
 

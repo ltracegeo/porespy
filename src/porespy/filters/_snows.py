@@ -598,19 +598,21 @@ def trim_nearby_peaks(peaks, dt, f=1):
     return new_peaks
 
 
-def _estimate_overlap(im, mode='dt', zoom=0.25):
+def _estimate_overlap(im, mode='dt', zoom=0.25, dt=None):
     logger.info('Calculating overlap thickness')
     if mode == 'watershed':
         rev = spim.interpolation.zoom(im, zoom=zoom, order=0)
         rev = rev > 0
-        dt = edt(rev)
+        if dt is None:
+            dt = edt(rev)
         rev_snow = snow_partitioning(rev, dt=dt)
         labels, counts = np.unique(rev_snow, return_counts=True)
         node = np.where(counts == counts[1:].max())[0][0]
         slices = spim.find_objects(rev_snow)
         overlap = max(rev_snow[slices[node - 1]].shape) / (zoom * 2.0)
     if mode == 'dt':
-        dt = edt((im > 0))
+        if dt in None:
+            dt = edt((im > 0))
         overlap = dt.max()
     return overlap
 
@@ -621,6 +623,7 @@ def snow_partitioning_parallel(im,
                                divs=2,
                                overlap=None,
                                cores=None,
+                               dt=None,
                                ):
     r"""
     Performs SNOW algorithm in parallel (or serial) to reduce time
@@ -674,6 +677,10 @@ def snow_partitioning_parallel(im,
             im = im.swapaxes(0, i)
             im = im[:shape[i], ...]
             im = im.swapaxes(i, 0)
+            if dt is not None:
+                dt = dt.swapaxes(0, i)
+                dt = dt[:shape[i], ...]
+                dt = dt.swapaxes(i, 0)
         logger.debug(f'Image was cropped to shape {shape}')
 
     # Get overlap thickness from distance transform
@@ -681,11 +688,12 @@ def snow_partitioning_parallel(im,
     logger.info('Beginning parallel SNOW algorithm...')
 
     if overlap is None:
-        overlap = _estimate_overlap(im, mode='dt')
+        overlap = _estimate_overlap(im, mode='dt', dt=dt)
     overlap = overlap / 2.0
     logger.debug(f'Overlap thickness: {int(2 * overlap)} voxels')
 
-    dt = edt((im > 0))
+    if dt is None:
+        dt = edt((im > 0))
 
     # Get overlap and trim depth of all image dimension
     depth = {}
