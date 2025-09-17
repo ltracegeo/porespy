@@ -611,7 +611,7 @@ def _estimate_overlap(im, mode='dt', zoom=0.25, dt=None):
         slices = spim.find_objects(rev_snow)
         overlap = max(rev_snow[slices[node - 1]].shape) / (zoom * 2.0)
     if mode == 'dt':
-        if dt in None:
+        if dt is None:
             dt = edt((im > 0))
         overlap = dt.max()
     return overlap
