@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def estimate_overlap_and_chunk(im, dt=None):
-    divs = [2 for i in range(im.ndim)]
+    divs = [2,] * im.ndim
 
     shape = []
     for i in range(im.ndim):
@@ -206,14 +206,15 @@ def snow2(
         vals = vals[vals > 0]
     if peaks is not None:
         parallelization = None
+    overlaps = {}
     for i in vals:
         phase = phases == i
         if force_cpu:
             phase_dt = jit_edt_cpu(phase)
         else:
             phase_dt = None
-        overlap, chunk = estimate_overlap_and_chunk(phase, dt=phase_dt)
-        if (overlap > (chunk//2 - 1)).any():
+        overlaps[i], chunk = estimate_overlap_and_chunk(phase, dt=phase_dt)
+        if (overlaps[i] > (chunk//2 - 1)).any():
             parallelization = None
             logger.warning("Disabling paralelization as overlap exceeds chunk size.")
     if type(sigma) is not dict:
@@ -230,12 +231,12 @@ def snow2(
             dt = jit_edt_cpu(phase)
         else:
             dt = None
-        if parallelization is not None:
+        if parallelization is not None and False:
             snow = snow_partitioning_parallel(
                 im=phase,
                 sigma=sigma[i],
                 r_max=r_max,
-                overlap=overlap,
+                overlap=overlaps[i],
                 **parallelization,
                 dt=dt,
             )
