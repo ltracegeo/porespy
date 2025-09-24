@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def estimate_overlap_and_chunk(im, dt=None):
-    divs = [2 for i in range(im.ndim)]
+    divs = [2,] * im.ndim
 
     shape = []
     for i in range(im.ndim):

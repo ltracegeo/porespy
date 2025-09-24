@@ -96,6 +96,7 @@ def regions_to_network_parallel(
     threads=None,
     force_cpu=False,
 ):
+    threads = 2 # DEBUG
     r"""
     Analyzes an image that has been partitioned into pore regions and extracts
     the pore and throat geometry as well as network connectivity.
@@ -640,17 +641,24 @@ def _jit_regions_to_network_parallel(
                             worker_status[worker_id] = FINISHED
                     if worker_status[worker_id] == DONE:
                         for throat_i in range(len(partial_t_conns_0[worker_id])):
-                            if partial_t_area[worker_id][throat_i] == 0 or partial_t_perimeter[worker_id][throat_i] == 0:
-                                continue
-                            t_conns_0.append(partial_t_conns_0[worker_id][throat_i])
-                            t_conns_1.append(partial_t_conns_1[worker_id][throat_i])
-                            t_dia_inscribed.append(partial_t_dia_inscribed[worker_id][throat_i])
-                            t_perimeter.append(partial_t_perimeter[worker_id][throat_i])
-                            t_area.append(partial_t_area[worker_id][throat_i])
-                            t_coords_0.append(partial_t_coords_0[worker_id][throat_i])
-                            t_coords_1.append(partial_t_coords_1[worker_id][throat_i])
-                            t_coords_2.append(partial_t_coords_2[worker_id][throat_i])
-
+                            #if partial_t_area[worker_id][throat_i] == 0 or partial_t_perimeter[worker_id][throat_i] == 0:
+                            #    continue
+                            t_conns_0.append(
+                                partial_t_conns_0[worker_id][throat_i])
+                            t_conns_1.append(
+                                partial_t_conns_1[worker_id][throat_i])
+                            t_dia_inscribed.append(
+                                partial_t_dia_inscribed[worker_id][throat_i])
+                            t_perimeter.append(
+                                partial_t_perimeter[worker_id][throat_i])
+                            t_area.append(
+                                partial_t_area[worker_id][throat_i])
+                            t_coords_0.append(
+                                partial_t_coords_0[worker_id][throat_i])
+                            t_coords_1.append(
+                                partial_t_coords_1[worker_id][throat_i])
+                            t_coords_2.append(
+                                partial_t_coords_2[worker_id][throat_i])
                         if current_pore <= Np:
                             worker_target[worker_id] = current_pore
                             current_pore += 1
@@ -679,7 +687,7 @@ def _jit_regions_to_network_parallel(
                     s = jit_extend_slice(slices[pore_id], im.shape)
                     sub_im = im[s]
                     sub_dt = dt[s]
-                    pore_im = sub_im == pore_label
+                    pore_im = (sub_im == pore_label)
                     padded_mask = pad(pore_im)
                     pore_dt = \
                         jit_edt_cpu(padded_mask, scale=voxel_size, sqrt_result=True)
@@ -718,15 +726,15 @@ def _jit_regions_to_network_parallel(
                         _get_throats(pore_im, sub_im, sub_dt, voxel_size)
                     for j in Pn:
                         if j > pore_id:
-                            if areas[j] == 0 or perimeters[j] == 0:
-                                continue
+                            #if areas[j] == 0 or perimeters[j] == 0:
+                            #    continue
 
                             partial_t_conns_0[self_id].append(pore_id)
                             partial_t_conns_1[self_id].append(j)
                             partial_t_dia_inscribed[self_id].append(
                                 inscribed_diameter[j])
                             partial_t_perimeter[self_id].append(perimeters[j])
-                            if inscribed_diameter[j] > (2 * max(voxel_size)):
+                            if inscribed_diameter[j] > (max(voxel_size)):
                                 partial_t_area[self_id].append(areas[j])
                             else:
                                 area = 4 * (inscribed_diameter[j]) ** 2
