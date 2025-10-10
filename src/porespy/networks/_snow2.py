@@ -245,7 +245,7 @@ def snow2(
             dt = jit_edt_cpu(phase)
         else:
             dt = None
-        if parallelization is not None and False:
+        if parallelization is not None:
             snow = snow_partitioning_parallel(
                 im=phase,
                 sigma=sigma[i],
