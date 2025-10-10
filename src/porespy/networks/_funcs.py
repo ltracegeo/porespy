@@ -307,6 +307,8 @@ def label_phases(
     to view online example.
 
     """
+    if not network:
+        return network
     conns = network['throat.conns']
     for i in alias.keys():
         pore_i_hits = network['pore.phase'] == i
