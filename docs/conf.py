@@ -1,61 +1,106 @@
-#------------------------------------------------------------------------#
-# Path setup                                                             #
-#------------------------------------------------------------------------#
+import os
+import shutil
+import sys
+from datetime import datetime
+
+import mock
+
+# ------------------------------------------------------------------------#
+# Path setup                                                              #
+# ------------------------------------------------------------------------#
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 
-import os
-import sys
-from datetime import datetime
-import mock
+sys.path.insert(0, os.path.abspath("."))
+sys.path.insert(0, os.path.abspath("../"))
+sys.path.insert(0, os.path.abspath("../../"))
 
-sys.path.insert(0, os.path.abspath('.'))
-sys.path.insert(0, os.path.abspath('../'))
-sys.path.insert(0, os.path.abspath('../../'))
-
-MOCK_MODULES = ['imagej']
+MOCK_MODULES = ["imagej"]
 for mod_name in MOCK_MODULES:
     sys.modules[mod_name] = mock.Mock()
 
-#------------------------------------------------------------------------#
-# Project info                                                           #
-#------------------------------------------------------------------------#
+# ------------------------------------------------------------------------#
+# Project info                                                            #
+# ------------------------------------------------------------------------#
 
-project = 'PoreSpy'
-copyright = f'{datetime.now().year}, PMEAL'
-author = 'PoreSpy Dev Team'
+project = "PoreSpy"
+copyright = f"{datetime.now().year}, PMEAL"
+author = "PoreSpy Dev Team"
 
-# Import examples_linker file/module so that it runs each time docs are built
-import examples_linker
+# Copy examples folder from PoreSpy root to docs folder
+shutil.copytree("../examples", "examples", dirs_exist_ok=True)
 
-#------------------------------------------------------------------------#
-# General config                                                         #
-#------------------------------------------------------------------------#
+# ------------------------------------------------------------------------#
+# General config                                                          #
+# ------------------------------------------------------------------------#
 
-extensions = ['sphinx.ext.autodoc',
-              'sphinx.ext.napoleon',
-              'sphinx.ext.autosummary',
-              'sphinx.ext.ifconfig',
-              'sphinx.ext.viewcode',
-              'sphinx.ext.mathjax',
-              'sphinx_copybutton',
-              'nbsphinx',
-              'nbsphinx_link',
-              'sphinx_panels']
+extensions = [
+    "sphinx.ext.autodoc",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.autosummary",
+    "sphinx.ext.ifconfig",
+    "sphinx.ext.viewcode",
+    "sphinx.ext.mathjax",
+    "sphinx_copybutton",
+    "sphinx_design",
+    "myst_nb",
+]
+
+myst_enable_extensions = [
+    "amsmath",
+    "colon_fence",
+    "deflist",
+    "dollarmath",
+    "html_image",
+]
+
+# So that 'sphinx-copybutton' only copies the actual code, not the prompt
+copybutton_prompt_text = r">>> |\.\.\. |\$ |In \[\d*\]: | {2,5}\.\.\.: | {5,8}: "
+copybutton_prompt_is_regexp = True
+
+add_module_names = False  # porespy.generators --> generators
+autosummary_generate = True
+globaltoc_maxdepth = 2
+
+# Add any paths that contain templates here, relative to this directory.
+templates_path = ["_templates"]
+# The master toctree document.
+master_doc = "index"
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+# The name of the Pygments (syntax highlighting) style to use.
+pygments_style = "sphinx"
+# If true, `todo` and `todoList` produce output, else they produce nothing.
+todo_include_todos = False
+# A list of ignored prefixes for module index sorting.
+modindex_common_prefix = ["porespy"]
+
+# ------------------------------------------------------------------------#
+# Options for HTML output                                                 #
+# ------------------------------------------------------------------------#
+
+html_theme = "pydata_sphinx_theme"
+html_logo = "_static/images/porespy_logo.png"
+html_js_files = ["js/custom.js"]
+html_css_files = ["css/custom.css"]
+html_static_path = ["_static"]
+# If false, no module index is generated.
+html_domain_indices = True
+# If false, no index is generated.
+html_use_index = True
+# If true, the index is split into individual pages for each letter.
+html_split_index = False
+# If true, links to the reST sources are added to the pages.
+html_show_sourcelink = False
+# If true, "Created using Sphinx" is shown in the HTML footer. Default is True.
+html_show_sphinx = False
 
 html_theme_options = {
-    "logo_link": "https://www.porespy.org",
     "icon_links": [
         {
             "name": "GitHub",
             "url": "https://github.com/PMEAL/porespy",
             "icon": "fab fa-github-square",
-        },
-        {
-            "name": "Substack",
-            "url": "https://porespy.substack.com/",
-            "icon": "fas fa-envelope-square",
         },
         {
             "name": "Twitter",
@@ -64,12 +109,8 @@ html_theme_options = {
         },
     ],
     "external_links": [
-        {
-            "name": "Issue Tracker", "url": "https://github.com/PMEAL/porespy/issues"
-        },
-        {
-            "name": "Get Help", "url": "https://github.com/PMEAL/porespy/discussions"
-        },
+        {"name": "Issue Tracker", "url": "https://github.com/PMEAL/porespy/issues"},
+        {"name": "Get Help", "url": "https://github.com/PMEAL/porespy/discussions"},
     ],
     "navigation_with_keys": False,
     "show_prev_next": False,
@@ -79,163 +120,12 @@ html_theme_options = {
     "navbar_align": "left",
 }
 
-html_sidebars = {
-    "contributing": ["sidebar-search-bs.html"],
-    "changelog": [],
-    "examples/*": []
-}
-
-# So that 'sphinx-copybutton' only copies the actual code, not the prompt
-copybutton_prompt_text = r">>> |\.\.\. |\$ |In \[\d*\]: | {2,5}\.\.\.: | {5,8}: "
-copybutton_prompt_is_regexp = True
-
-html_js_files = ['js/custom.js']
-
-html_css_files = ['css/custom.css']
-
-nbsphinx_prompt_width = "0"
-
-nbsphinx_execute = 'always'
-
-panels_add_bootstrap_css = False  # to fix narrow width
-
-exclude_patterns = ['_build', '_templates']
-
-add_module_names = False  # porespy.generators --> generators
-
-autosummary_generate = True
-
-globaltoc_maxdepth = 2
-
-# Add any paths that contain templates here, relative to this directory.
-templates_path = ['_templates']
-
-# The suffix(es) of source filenames.
-# You can specify multiple suffix as a list of string:
-
-# The master toctree document.
-master_doc = 'index'
-
-# The version info for the project you're documenting, acts as replacement for
-# |version| and |release|, also used in various other places throughout the
-# built documents.
-#
-# The short X.Y version.
-# version = '0.2'
-# The full version, including alpha/beta/rc tags.
-# release = '0.2'
-
-# The language for content autogenerated by Sphinx. Refer to documentation
-# for a list of supported languages.
-#
-# This is also used if you do content translation via gettext catalogs.
-# Usually you set "language" from the command line for these cases.
-language = None
-
-# List of patterns, relative to source directory, that match files and
-# directories to ignore when looking for source files.
-# This patterns also effect to html_static_path and html_extra_path
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
-
-# The name of the Pygments (syntax highlighting) style to use.
-pygments_style = 'sphinx'
-
-# If true, `todo` and `todoList` produce output, else they produce nothing.
-todo_include_todos = False
-
-# A list of ignored prefixes for module index sorting.
-modindex_common_prefix = ['porespy']
-
-# If false, no module index is generated.
-html_domain_indices = True
-
-# If false, no index is generated.
-html_use_index = True
-
-# If true, the index is split into individual pages for each letter.
-html_split_index = False
-
-# If true, links to the reST sources are added to the pages.
-html_show_sourcelink = False
-
-# If true, "Created using Sphinx" is shown in the HTML footer. Default is True.
-html_show_sphinx = False
-
-# -- Options for HTML output ----------------------------------------------
-
-# The theme to use for HTML and HTML Help pages.  See the documentation for
-# a list of builtin themes.
-
-# html_theme = 'alabaster'
-# html_theme = 'sphinx_rtd_theme'
-html_theme = 'pydata_sphinx_theme'
-
-html_logo = '_static/images/porespy_logo.png'
-
-# Theme options are theme-specific and customize the look and feel of a theme
-# further.  For a list of options available for each theme, see the
-# documentation.
-#
-# html_theme_options = {}
-
-# Add any paths that contain custom static files (such as style sheets) here,
-# relative to this directory. They are copied after the builtin static files,
-# so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
+html_sidebars = {}
 
 
-# -- Options for HTMLHelp output ------------------------------------------
+# ------------------------------------------------------------------------#
+# Options for HTMLHelp output                                             #
+# ------------------------------------------------------------------------#
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'PoreSpydoc'
-
-
-# -- Options for LaTeX output ---------------------------------------------
-
-latex_elements = {
-    # The paper size ('letterpaper' or 'a4paper').
-    #
-    # 'papersize': 'letterpaper',
-
-    # The font size ('10pt', '11pt' or '12pt').
-    #
-    # 'pointsize': '10pt',
-
-    # Additional stuff for the LaTeX preamble.
-    #
-    # 'preamble': '',
-
-    # Latex figure (float) alignment
-    #
-    # 'figure_align': 'htbp',
-}
-
-# Grouping the document tree into LaTeX files. List of tuples
-# (source start file, target name, title,
-#  author, documentclass [howto, manual, or own class]).
-latex_documents = [
-    (master_doc, 'PoreSpy.tex', 'PoreSpy Documentation',
-     'PMEAL Team', 'manual'),
-]
-
-
-# -- Options for manual page output ---------------------------------------
-
-# One entry per manual page. List of tuples
-# (source start file, name, description, authors, manual section).
-man_pages = [
-    (master_doc, 'porespy', 'PoreSpy Documentation',
-     [author], 1)
-]
-
-
-# -- Options for Texinfo output -------------------------------------------
-
-# Grouping the document tree into Texinfo files. List of tuples
-# (source start file, target name, title, author,
-#  dir menu entry, description, category)
-texinfo_documents = [
-    (master_doc, 'PoreSpy', 'PoreSpy Documentation',
-     author, 'PoreSpy', 'One line description of project.',
-     'Miscellaneous'),
-]
+htmlhelp_basename = "PoreSpydoc"

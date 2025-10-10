@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 
 def test_drainage():
     np.random.seed(6)
-    im = ps.generators.blobs(shape=[500, 500], porosity=0.7, blobiness=1.5)
+
+    im = ps.generators.blobs(shape=[500, 500], porosity=0.708328, blobiness=1.5)
     inlets = np.zeros_like(im)
     inlets[0, :] = True
     outlets = np.zeros_like(im)
@@ -116,3 +117,7 @@ def test_drainage():
     assert drn2.snwp[-1] == 0.943675265674663
     assert drn3.snwp[-1] == 1
     assert drn4.snwp[-1] == 0.836364876928238
+
+
+if __name__ == "__main__":
+    test_drainage()

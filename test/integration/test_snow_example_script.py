@@ -36,3 +36,7 @@ def test_snow_example_script():
         op.topotools.plot_connections(network=proj.network, ax=ax)
         op.topotools.plot_coordinates(network=proj.network, ax=ax)
         plt.axis('off')
+
+
+if __name__ == "__main__":
+    test_snow_example_script()

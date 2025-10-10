@@ -3,7 +3,7 @@
 </p>
 
 [![image](https://img.shields.io/pypi/v/porespy.svg)](https://pypi.python.org/pypi/porespy/)
-[![Pyversions](https://img.shields.io/pypi/pyversions/porespy.svg?style=flat-square&label=Python%20Versions)](https://pypi.python.org/pypi/porespy)
+[![image](https://codecov.io/gh/PMEAL/PoreSpy/branch/dev/graph/badge.svg)](https://codecov.io/gh/PMEAL/PoreSpy)
 
 # What is PoreSpy?
 
@@ -60,7 +60,7 @@ necessary.
 
 # Installation
 
-For detailed and up to date installation instructions, [see here](https://porespy.org/user_guide/installation.html)
+For detailed and up to date installation instructions, [see here](https://porespy.org/installation.html)
 
 # Contributing
 
@@ -73,10 +73,6 @@ and install it using the following PIP command:
 
 For information about contributing, refer to the [contributors
 guide](https://github.com/PMEAL/porespy/blob/dev/CONTRIBUTING.md)
-
-# Stay Informed
-
-It's surprizingly hard to communicate with our users, since Github doesn't allow sending out email newsletters or announcements.  To address this gap, we have created a [Substack channel](https://porespy.substack.com/p/coming-soon?r=e02s8&utm_campaign=post&utm_medium=web&utm_source=copy), where you can subscribe to our feed to receive periodic news about important events and updates.
 
 # Acknowledgements
 

@@ -3,11 +3,16 @@ import pytest
 import numpy as np
 import porespy as ps
 from skimage import io
-import pyedt
 from pathlib import Path
 import scipy.ndimage as spim
 from skimage.morphology import ball
 from numpy.testing import assert_allclose
+try:
+    from pyedt import edt
+except ModuleNotFoundError:
+    from edt import edt
+
+
 ps.settings.tqdm['disable'] = True
 
 
@@ -24,8 +29,11 @@ class MetricsTest():
         self.im3D = ps.generators.lattice_spheres(shape=[51, 51, 51],
                                                   r=4, spacing=14,
                                                   lattice='cubic')
-        self.blobs = ps.generators.blobs(shape=[101, 101, 101], porosity=0.5,
-                                         blobiness=[1, 2, 3])
+        self.blobs = ps.generators.blobs(shape=[101, 101, 101],
+                                         porosity=0.500148014997559,
+                                         blobiness=[1, 2, 3],
+                                         seed=0)
+        assert self.blobs.sum()/self.blobs.size == 0.500148014997559
         path = Path(os.path.realpath(__file__),
                     '../../../test/fixtures/partitioned_regions.tif')
         self.regions = np.array(io.imread(path))
@@ -53,6 +61,14 @@ class MetricsTest():
         phi1 = ps.metrics.porosity(im=self.im3D)
         assert np.sqrt((np.mean(tpcf_fft.probability[-5:]) - phi1)**2) < t
 
+    def test_tpcf_fft_3d_scaled(self):
+        tpcf = ps.metrics.two_point_correlation(im=self.im3D)
+        phi1 = ps.metrics.porosity(im=self.im3D)
+        # The first value at r = 0 should be equal to porosity
+        assert np.abs(tpcf.probability_scaled[0] - phi1) < 0.01
+        # The function should decay to phi**2
+        assert np.abs(np.mean(tpcf.probability_scaled[-5:] - phi1**2)) < 0.01
+
     def test_pore_size_distribution(self):
         mip = ps.filters.porosimetry(self.im3D)
         psd = ps.metrics.pore_size_distribution(mip)
@@ -71,7 +87,7 @@ class MetricsTest():
         assert (np.mean(rev.porosity) - 0.5)**2 < 0.05
 
     def test_radial_density(self):
-        dt = np.sqrt(pyedt.edt(self.blobs))
+        dt = edt(self.blobs)
         den = ps.metrics.radial_density_distribution(dt)
         assert den.cdf.max() == 1
 
@@ -169,6 +185,9 @@ class MetricsTest():
         assert_allclose(vol_march, 4102.28678846)
         assert_allclose(vol_vox, 4169.)
 
+    def test_region_interface_areas(self):
+        pass
+
     def test_phase_fraction(self):
         im = np.reshape(np.random.randint(0, 10, 1000), [10, 10, 10])
         labels = np.unique(im, return_counts=True)[1]
@@ -192,13 +211,23 @@ class MetricsTest():
         assert np.allclose(v, [0.2, 0.3, 0.5])
 
     def test_representative_elementary_volume(self):
-        im = ps.generators.lattice_spheres(shape=[999, 999],
-                                           r=15, offset=4)
+        im = ps.generators.lattice_spheres(
+            shape=[999, 999],
+            r=15,
+            offset=4,
+            smooth=True,
+            lattice='sc',
+        )
         rev = ps.metrics.representative_elementary_volume(im)
         assert_allclose(np.average(rev.porosity), im.sum() / im.size, rtol=1e-1)
 
-        im = ps.generators.lattice_spheres(shape=[151, 151, 151],
-                                           r=9, offset=4)
+        im = ps.generators.lattice_spheres(
+            shape=[151, 151, 151],
+            r=9,
+            offset=4,
+            smooth=True,
+            lattice='sc',
+        )
         rev = ps.metrics.representative_elementary_volume(im)
         assert_allclose(np.average(rev.porosity), im.sum() / im.size, rtol=1e-1)
 
@@ -235,18 +264,143 @@ class MetricsTest():
         # assert out[1] >= 1
 
     def test_pc_curve(self):
-        im = ps.generators.blobs(shape=[100, 100], porosity=0.7)
+        im = ps.generators.blobs(shape=[100, 100], porosity=0.7026, seed=0)
+        assert im.sum()/im.size == 0.7026
         sizes = ps.filters.porosimetry(im=im)
         pc = ps.metrics.pc_curve(sizes=sizes, im=im)
         assert hasattr(pc, 'pc')
         assert hasattr(pc, 'snwp')
 
     def test_pc_curve_from_ibip(self):
-        im = ps.generators.blobs(shape=[100, 100], porosity=0.7)
+        im = ps.generators.blobs(shape=[100, 100], porosity=0.7026, seed=0)
+        assert im.sum()/im.size == 0.7026
         seq, sizes = ps.filters.ibip(im=im)
         pc = ps.metrics.pc_curve(im=im, sizes=sizes, seq=seq)
         assert hasattr(pc, 'pc')
         assert hasattr(pc, 'snwp')
+
+    def test_satn_profile_axis(self):
+        satn = np.tile(np.atleast_2d(np.linspace(1, 0.01, 100)), (100, 1))
+        satn[:25, :] = 0
+        satn[-25:, :] = -1
+        prof1 = ps.metrics.satn_profile(satn=satn, s=0.5, axis=1, span=1, mode='tile')
+        assert len(prof1.saturation) == 100
+        assert prof1.saturation[0] == 0
+        assert prof1.saturation[-1] == 2/3
+        assert prof1.saturation[49] == 0
+        assert prof1.saturation[50] == 2/3
+        prof1 = ps.metrics.satn_profile(satn=satn, s=0.5, axis=0, span=1, mode='tile')
+        assert len(prof1.saturation) == 100
+        assert np.isnan(prof1.saturation[0])
+        assert prof1.saturation[-1] == 0
+        assert prof1.saturation[50] == 0.5
+
+    def test_satn_profile_span(self):
+        satn = np.tile(np.atleast_2d(np.linspace(1, 0.01, 100)), (100, 1))
+        satn[:25, :] = 0
+        satn[-25:, :] = -1
+        prof1 = ps.metrics.satn_profile(satn=satn, s=0.5, axis=1, span=20, mode='tile')
+        assert len(prof1.saturation) == 5
+        assert prof1.saturation[0] == 0
+        assert prof1.saturation[-1] == 2/3
+        assert prof1.saturation[2] == 1/3
+        prof1 = ps.metrics.satn_profile(satn=satn, s=0.5, axis=1, span=20, mode='slide')
+        assert len(prof1.saturation) == 80
+        assert prof1.saturation[31] == 1/30
+        assert prof1.saturation[48] == 0.6
+
+    def test_satn_profile_threshold(self):
+        satn = np.tile(np.atleast_2d(np.linspace(1, 0.01, 100)), (100, 1))
+        satn[:25, :] = 0
+        satn[-25:, :] = -1
+        prof1 = ps.metrics.satn_profile(satn=satn, s=0.5, axis=1, span=1, mode='tile')
+        t = (satn <= 0.5)*(satn > 0)
+        im = satn != 0
+        prof2 = ps.metrics.satn_profile(satn=t, im=im, axis=1, span=1, mode='tile')
+        assert len(prof1.saturation) == 100
+        assert len(prof2.saturation) == 100
+        assert np.all(prof1.saturation == prof2.saturation)
+        prof1 = ps.metrics.satn_profile(satn=satn, s=0.5, axis=1, span=10, mode='tile')
+        prof2 = ps.metrics.satn_profile(satn=t, im=im, axis=1, span=10, mode='tile')
+        assert np.all(prof1.saturation == prof2.saturation)
+        prof1 = ps.metrics.satn_profile(satn=satn, s=0.5, axis=1, span=20, mode='slide')
+        prof2 = ps.metrics.satn_profile(satn=t, im=im, axis=1, span=20, mode='slide')
+        assert np.all(prof1.saturation == prof2.saturation)
+
+    def test_satn_profile_exception(self):
+        satn = np.tile(np.atleast_2d(np.linspace(0.4, 0.01, 100)), (100, 1))
+        satn[:25, :] = 0
+        satn[-25:, :] = -1
+        with pytest.raises(Exception):
+            _ = ps.metrics.satn_profile(satn=satn, s=0.5)
+
+    def test_pc_map_to_pc_curve_drainage_with_trapping_and_residual(self):
+        vx = 50e-6
+        im = ps.generators.blobs(shape=[200, 200], porosity=0.5088, blobiness=2, seed=0)
+        assert im.sum()/im.size == 0.5088
+        mio = ps.filters.porosimetry(im)
+        trapped = im*(~ps.filters.fill_blind_pores(im))
+        residual = im*(~trapped)*(mio < mio.mean())
+        pc = -2*0.072*np.cos(np.radians(110))/(mio*vx)
+        pc[trapped] = np.inf
+        pc[residual] = -np.inf
+        d = ps.metrics.pc_map_to_pc_curve(pc, im)
+        assert d.snwp[0] == residual.sum()/im.sum()
+        assert d.snwp[-1] == (im.sum() - trapped.sum())/im.sum()
+
+    def test_pc_map_to_pc_curve_invasion_with_trapping(self):
+        vx = 50e-6
+        im = ps.generators.blobs(shape=[200, 200], porosity=0.5088, blobiness=2, seed=0)
+        assert im.sum()/im.size == 0.5088
+        ibip = ps.simulations.ibip(im=im)
+        pc = -2*0.072*np.cos(np.radians(110))/(ibip.inv_sizes*vx)
+        trapped = ibip.inv_sequence == -1
+        # residual = pc*im > 500
+        pc[trapped] = np.inf
+        seq = ibip.inv_sequence
+        d = ps.metrics.pc_map_to_pc_curve(pc=pc, im=im, seq=seq)
+        # assert d.snwp[0] == residual.sum()/im.sum()
+        assert d.snwp[-1] == (im.sum() - trapped.sum())/im.sum()
+
+    def test_pc_map_to_pc_curve_compare_invasion_to_drainage(self):
+        vx = 50e-6
+        im = ps.generators.blobs(shape=[200, 200], porosity=0.6185, blobiness=1, seed=0)
+        assert im.sum()/im.size == 0.6185
+        im = ps.filters.fill_blind_pores(im, conn=8, surface=True)
+
+        # Do drainage without sequence
+        dt = edt(im)
+        mio = ps.filters.porosimetry(im, sizes=np.unique(dt)[1:].astype(int))
+        pc1 = -2*0.072*np.cos(np.radians(110))/(mio*vx)
+        d1 = ps.metrics.pc_map_to_pc_curve(pc=pc1, im=im)
+
+        # Ensure drainage works with sequence
+        seq = ps.filters.pc_to_seq(pc1, im)
+        d3 = ps.metrics.pc_map_to_pc_curve(pc=pc1, im=im, seq=seq)
+
+        # Using the original ibip, which requires that sequence be supplied
+        ibip = ps.simulations.ibip(im=im)
+        pc2 = -2*0.072*np.cos(np.radians(110))/(ibip.inv_sizes*vx)
+        pc2[ibip.inv_sequence < 0] = np.inf
+        seq = ibip.inv_sequence
+        d2 = ps.metrics.pc_map_to_pc_curve(pc=pc2, im=im, seq=seq)
+
+        # Ensure they all return the same Pc values
+        assert_allclose(np.unique(d1.pc), np.unique(d2.pc), rtol=1e-10)
+        assert_allclose(np.unique(d2.pc), np.unique(d3.pc), rtol=1e-10)
+        assert_allclose(np.unique(d1.pc), np.unique(d3.pc), rtol=1e-10)
+
+        # Ensure the high and low saturations are all the same
+        assert d1.snwp[0] == d2.snwp[0]
+        assert d1.snwp[-1] == d2.snwp[-1]
+        assert d2.snwp[0] == d3.snwp[0]
+        assert d2.snwp[-1] == d3.snwp[-1]
+
+        # These graphs should lie perfectly on top of each other
+        # import matplotlib.pyplot as plt
+        # plt.step(d1.pc, d1.snwp, 'r-o', where='post')
+        # plt.step(d3.pc, d3.snwp, 'b--', where='post')
+        # plt.step(d2.pc, d2.snwp, 'g.-', where='post')
 
 
 if __name__ == '__main__':

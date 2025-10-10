@@ -5,9 +5,10 @@ from copy import copy
 
 
 def test_ibip():
-    # Generate or load a test image
     np.random.seed(0)
-    im = ps.generators.blobs(shape=[200, 200], porosity=0.6, blobiness=2)
+
+    # Generate or load a test image
+    im = ps.generators.blobs(shape=[200, 200], porosity=0.605475, blobiness=2)
 
     bd = np.zeros_like(im)
     bd[:, 0] = True
@@ -27,3 +28,7 @@ def test_ibip():
         plt.imshow(inv_seq, cmap=cmap, vmin=1e-3,
                    interpolation='none', origin='lower')
         mov = ps.visualization.satn_to_movie(im, inv_satn)
+
+
+if __name__ == "__main__":
+    test_ibip()
