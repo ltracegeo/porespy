@@ -242,6 +242,9 @@ def regions_to_network_parallel(
         threads=threads,
     )
 
+    if not net:
+        return None
+
     net = dict(net)
     net_keys = [k for k in net.keys() if k[-6:] == "_int64"]
     for key in net_keys:
