@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+import dask
 import dask.array as da
 import inspect as insp
 import logging
@@ -702,8 +705,19 @@ def snow_partitioning_parallel(im,
         depth[i] = int(2.0 * overlap)
         trim_depth[i] = int(2.0 * overlap) - 1
 
+    try:
+        dask.distributed.get_client()  # checks for distributed context
+        distributed = True
+    except ValueError:
+        distributed = False
+
     # Applying SNOW to image chunks
-    regions = da.from_array(dt, chunks=chunk_shape)
+    if distributed:
+        with dask.config.set(scheduler="single-threaded"):
+            _save_to_stack(dt, "regions_npy_stack", chunk_shape)
+        regions = _load_delayed_from_stack("regions_npy_stack", chunk_shape, divs, dt.dtype)
+    else:
+        regions = da.from_array(dt, chunks=chunk_shape)
     regions = da.overlap.overlap(regions, depth=depth, boundary='none')
     regions = regions.map_blocks(_snow_chunked, r_max=r_max,
                                  sigma=sigma, dtype=dt.dtype)
@@ -723,7 +737,40 @@ def snow_partitioning_parallel(im,
     tup.im = im
     tup.dt = dt
     tup.regions = regions
+
+
     return tup
+
+
+def _save_to_stack(dt, directory, chunk_shape):
+    regions = da.from_array(dt, chunks=chunk_shape)
+    os.makedirs(directory, exist_ok=True)
+    def save_block(block, block_info=None):
+        idx = block_info[None]["chunk-location"]
+        filename = str(Path(directory) / f"{idx[0]}-{idx[1]}-{idx[2]}.npy")
+        np.save(filename, block)
+        return block
+    regions.map_blocks(save_block, dtype=regions.dtype).compute()
+
+
+def _load_delayed_from_stack(directory_name, chunk_shape, divs, dtype):
+    directory_path = Path(os.getcwd()) / directory_name
+    files = os.listdir(str(directory_path))
+    def parse_filename(fname):
+        name = os.path.splitext(fname)[0]  # remove .npy
+        return tuple(map(int, name.split('-')))
+    blocks = {}
+    for f in files:
+        idx = parse_filename(f)
+        path = str(directory_path / f)
+        blocks[idx] = dask.delayed(np.load)(path)
+    nested_blocks = [[[blocks[(i,j,k)] for k in range(divs[2])]
+                for j in range(divs[1])]
+                for i in range(divs[0])]
+    dask_blocks = [[[da.from_delayed(block, shape=chunk_shape, dtype=dtype)
+                for block in row] for row in plane] for plane in nested_blocks]
+    regions = da.block(dask_blocks)
+    return regions
 
 
 def _pad(im, pad_width=1, constant_value=0):
