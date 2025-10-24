@@ -102,7 +102,6 @@ def regions_to_network_parallel(
     threads=None,
     force_cpu=False,
 ):
-    threads = 2 # DEBUG
     r"""
     Analyzes an image that has been partitioned into pore regions and extracts
     the pore and throat geometry as well as network connectivity.
@@ -370,9 +369,15 @@ def _get_throats(
         (n+1 of actual pore table index)
     """
     w, h, d = pore_im.shape
-    conns = set()
-    inscribed_diameters = {-1: 0.}
-    areas = {-1: 0.}
+    conns_set = set()
+    inscribed_diameters = {-1: np.float64(0.)}
+    areas_total = {-1: np.float64(0.)}
+    areas_axis_0 = {-1: np.float64(0.)}
+    areas_axis_1 = {-1: np.float64(0.)}
+    areas_axis_2 = {-1: np.float64(0.)}
+    areas_axis_projection_0 = {-1: np.float64(0.)}
+    areas_axis_projection_1 = {-1: np.float64(0.)}
+    areas_axis_projection_2 = {-1: np.float64(0.)}
     perimeters = {-1: 0.}
     centers = {-1: (0., 0., 0.)}
     val_count = Dict()
@@ -392,6 +397,12 @@ def _get_throats(
         2: [(a, b, 0) for a in range(-1,2) for b in range(-1,2) if (a != 0 or b != 0)],
     }
 
+    voxel_face_area = {
+        0: np.float64(voxel_size[1] * voxel_size[2]),
+        1: np.float64(voxel_size[0] * voxel_size[2]),
+        2: np.float64(voxel_size[0] * voxel_size[1]),
+    }
+
     for x in range(1, w - 1):
         for y in range(1, h - 1):
             for z in range(1, d - 1):
@@ -407,7 +418,7 @@ def _get_throats(
                         neighbour_pore_id = neighbour_pore_label - 1
                         if neighbour_pore_id == -1:
                             continue
-                        conns.add(np.int64(neighbour_pore_id))
+                        conns_set.add(np.int64(neighbour_pore_id))
 
                         # Center and diameter calculations, for every throat voxel
                         dt = sub_dt[x2, y2, z2]
@@ -441,7 +452,7 @@ def _get_throats(
                                 (z2) * voxel_size[2],
                                 )
                             
-                        ### Check if is border
+                        ### calculate perimeter
                         perimeter = 0
                         try:
                             if (ax == 0) and (dx == 1):
@@ -486,65 +497,99 @@ def _get_throats(
                                     neighbour_pore_label,
                                     ):
                                     perimeter = (voxel_size[0] + voxel_size[1])/2
-
                         except Exception:
                             pass
+                        # end calculate perimeter
 
-                        area = voxel_size[0] * voxel_size[1] * voxel_size[2] / voxel_size[ax]
-                        """
-                        # get pseudo-projection
-                        if throat_perimeter_mode == "original":
-                            projection = np.ones((3, 3), dtype=np.uint8)
-                        else:
-                            projection = np.zeros((3, 3), dtype=np.uint8)
-                            projection[1, 1] = 1
-
-                        for dx2, dy2, dz2, px, py in lateral_columns_generator(ax):
-                            x3 = x2 + dx2
-                            y3 = y2 + dy2
-                            z3 = z2 + dz2
-
-                            if (x3 < 0 or x3 >= w) or \
-                                    (y3 < 0 or y3 >= h) or \
-                                    (z3 < 0 or z3 >= d):
-                                continue
-
-                            if throat_perimeter_mode == "original":
-                                if sub_im[x3, y3, z3] == 0:
-                                    projection[px, py] = 0
-                            else:
-                                if sub_im[x3, y3, z3] != (val + 1):
-                                    pass
-                                elif _is_throat(pore_im, x3, y3, z3):
-                                    projection[px, py] = 1
-
-                        if ax == 0:
-                            projection_size = (voxel_size[1], voxel_size[2])
-                        elif ax == 1:
-                            projection_size = (voxel_size[0], voxel_size[2])
-                        elif ax == 2:
-                            projection_size = (voxel_size[0], voxel_size[1])
-                        perimeter, area = jit_marching_squares_perimeter_and_area(
-                            projection,
-                            target_label=1,
-                            spacing=projection_size,
-                            overlap=True,
-                            )
-                        """
+                        area = voxel_face_area[ax]
 
                         if neighbour_pore_id in list(perimeters.keys()):
                             perimeters[neighbour_pore_id] += perimeter
                         else:
                             perimeters[neighbour_pore_id] = perimeter
 
-                        if neighbour_pore_id in list(areas.keys()):
-                            areas[neighbour_pore_id] += area
+                        if neighbour_pore_id in list(areas_total.keys()):
+                            areas_total[neighbour_pore_id] += area
                         else:
-                            areas[neighbour_pore_id] = area
+                            areas_total[neighbour_pore_id] = area
+
+                        if ax == 0:
+                            area_0 = area
+                            area_1 = np.int64(0)
+                            area_2 = np.int64(0)
+                        if ax == 1:
+                            area_0 = np.int64(0)
+                            area_1 = area
+                            area_2 = np.int64(0)
+                        if ax == 2:
+                            area_0 = np.int64(0)
+                            area_1 = np.int64(0)
+                            area_2 = area
+
+                        if neighbour_pore_id in list(areas_axis_0.keys()):
+                            areas_axis_0[neighbour_pore_id] += area_0
+                            areas_axis_1[neighbour_pore_id] += area_1
+                            areas_axis_2[neighbour_pore_id] += area_2
+                        else:
+                            areas_axis_0[neighbour_pore_id] = area_0
+                            areas_axis_1[neighbour_pore_id] = area_1
+                            areas_axis_2[neighbour_pore_id] = area_2
+
+                        if neighbour_pore_id in list(areas_axis_projection_0.keys()):
+                            if [dx, dy, dz][ax] > 0:
+                                areas_axis_projection_0[neighbour_pore_id] += area_0
+                                areas_axis_projection_1[neighbour_pore_id] += area_1
+                                areas_axis_projection_2[neighbour_pore_id] += area_2
+                            elif [dx, dy, dz][ax] < 0:
+                                areas_axis_projection_0[neighbour_pore_id] -= area_0
+                                areas_axis_projection_1[neighbour_pore_id] -= area_1
+                                areas_axis_projection_2[neighbour_pore_id] -= area_2
+                        else:
+                            if [dx, dy, dz][ax] > 0:
+                                areas_axis_projection_0[neighbour_pore_id] = area_0
+                                areas_axis_projection_1[neighbour_pore_id] = area_1
+                                areas_axis_projection_2[neighbour_pore_id] = area_2
+                            elif [dx, dy, dz][ax] < 0:
+                                areas_axis_projection_0[neighbour_pore_id] = -area_0
+                                areas_axis_projection_1[neighbour_pore_id] = -area_1
+                                areas_axis_projection_2[neighbour_pore_id] = -area_2
+
+    areas_cuboid_transversal = {-1: np.float64(0.)}
+    areas_cuboid_projection = {-1: np.float64(0.)}
+    areas_largest_sphere = {-1: np.float64(0.)}
+    conns_list = list(conns_set)
+    for conn in conns_list:
+        a1 = areas_axis_0[conn]
+        a2 = areas_axis_1[conn]
+        a3 = areas_axis_2[conn]
+        a = base_tetrahedron_area(a1, a2, a3)
+        areas_cuboid_transversal[conn] = np.float64(a)
+
+        areas_axis_projection_0[conn] = abs(areas_axis_projection_0[conn])
+        areas_axis_projection_1[conn] = abs(areas_axis_projection_1[conn])
+        areas_axis_projection_2[conn] = abs(areas_axis_projection_2[conn])
+        a1p = areas_axis_projection_0[conn]
+        a2p = areas_axis_projection_1[conn]
+        a3p = areas_axis_projection_2[conn]
+        ap = base_tetrahedron_area(a1p, a2p, a3p)
+        areas_cuboid_projection[conn] = np.float64(ap)
+
+        ad = np.pi * inscribed_diameters[conn]**2
+        areas_largest_sphere[conn] = np.float64(ad)
+
     return (
-        list(conns),
+        conns_list,
         inscribed_diameters,
-        areas,
+        areas_total,
+        areas_cuboid_transversal,
+        areas_cuboid_projection,
+        areas_largest_sphere,
+        areas_axis_0,
+        areas_axis_1,
+        areas_axis_2,
+        areas_axis_projection_0,
+        areas_axis_projection_1,
+        areas_axis_projection_2,
         perimeters,
         centers,
         )
@@ -590,29 +635,56 @@ def _jit_regions_to_network_parallel(
     t_conns_1 = []
     t_dia_inscribed = []
     t_area = []
+    t_area_cuboid = []
+    t_area_projection = []
+    t_area_sphere = []
     t_perimeter = []
     t_coords_0 = []
     t_coords_1 = []
     t_coords_2 = []
+    t_area_axis_0 = []
+    t_area_axis_1 = []
+    t_area_axis_2 = []
+    t_area_axis_projection_0 = []
+    t_area_axis_projection_1 = []
+    t_area_axis_projection_2 = []
 
     partial_t_conns_0 = []
     partial_t_conns_1 = []
     partial_t_dia_inscribed = []
     partial_t_area = []
+    partial_t_area_cuboid = []
+    partial_t_area_projection = []
+    partial_t_area_sphere = []
     partial_t_perimeter = []
     partial_t_coords_0 = []
     partial_t_coords_1 = []
     partial_t_coords_2 = []
+    partial_t_area_axis_0 = []
+    partial_t_area_axis_1 = []
+    partial_t_area_axis_2 = []
+    partial_t_area_axis_projection_0 = []
+    partial_t_area_axis_projection_1 = []
+    partial_t_area_axis_projection_2 = []
 
     for i in range(threads-1):
         partial_t_conns_0.append(List.empty_list(np.uint64))
         partial_t_conns_1.append(List.empty_list(np.uint64))
         partial_t_dia_inscribed.append(List.empty_list(np.float64))
         partial_t_area.append(List.empty_list(np.float64))
+        partial_t_area_cuboid.append(List.empty_list(np.float64))
+        partial_t_area_projection.append(List.empty_list(np.float64))
+        partial_t_area_sphere.append(List.empty_list(np.float64))
         partial_t_perimeter.append(List.empty_list(np.float64))
         partial_t_coords_0.append(List.empty_list(np.float64))
         partial_t_coords_1.append(List.empty_list(np.float64))
         partial_t_coords_2.append(List.empty_list(np.float64))
+        partial_t_area_axis_0.append(List.empty_list(np.float64))
+        partial_t_area_axis_1.append(List.empty_list(np.float64))
+        partial_t_area_axis_2.append(List.empty_list(np.float64))
+        partial_t_area_axis_projection_0.append(List.empty_list(np.float64))
+        partial_t_area_axis_projection_1.append(List.empty_list(np.float64))
+        partial_t_area_axis_projection_2.append(List.empty_list(np.float64))
 
     worker_status = np.zeros((threads-1,), dtype=np.uint32)
     worker_target = np.zeros((threads-1,), dtype=np.uint32)
@@ -644,12 +716,25 @@ def _jit_regions_to_network_parallel(
                                 partial_t_perimeter[worker_id][throat_i])
                             t_area.append(
                                 partial_t_area[worker_id][throat_i])
+                            t_area_cuboid.append(
+                                partial_t_area_cuboid[worker_id][throat_i])
+                            t_area_projection.append(
+                                partial_t_area_projection[worker_id][throat_i])
+                            t_area_sphere.append(
+                                partial_t_area_sphere[worker_id][throat_i])
                             t_coords_0.append(
                                 partial_t_coords_0[worker_id][throat_i])
                             t_coords_1.append(
                                 partial_t_coords_1[worker_id][throat_i])
                             t_coords_2.append(
                                 partial_t_coords_2[worker_id][throat_i])
+                            t_area_axis_0.append(partial_t_area_axis_0[worker_id][throat_i])
+                            t_area_axis_1.append(partial_t_area_axis_1[worker_id][throat_i])
+                            t_area_axis_2.append(partial_t_area_axis_2[worker_id][throat_i])
+                            t_area_axis_projection_0.append(partial_t_area_axis_projection_0[worker_id][throat_i])
+                            t_area_axis_projection_1.append(partial_t_area_axis_projection_1[worker_id][throat_i])
+                            t_area_axis_projection_2.append(partial_t_area_axis_projection_2[worker_id][throat_i])
+
                         if current_pore <= Np:
                             worker_target[worker_id] = current_pore
                             current_pore += 1
@@ -667,10 +752,19 @@ def _jit_regions_to_network_parallel(
                     partial_t_conns_1[self_id] = List.empty_list(np.uint64)
                     partial_t_dia_inscribed[self_id] = List.empty_list(np.float64)
                     partial_t_area[self_id] = List.empty_list(np.float64)
+                    partial_t_area_cuboid[self_id] = List.empty_list(np.float64)
+                    partial_t_area_projection[self_id] = List.empty_list(np.float64)
+                    partial_t_area_sphere[self_id] = List.empty_list(np.float64)
                     partial_t_perimeter[self_id] = List.empty_list(np.float64)
                     partial_t_coords_0[self_id] = List.empty_list(np.float64)
                     partial_t_coords_1[self_id] = List.empty_list(np.float64)
                     partial_t_coords_2[self_id] = List.empty_list(np.float64)
+                    partial_t_area_axis_0[self_id] = List.empty_list(np.float64)
+                    partial_t_area_axis_1[self_id] = List.empty_list(np.float64)
+                    partial_t_area_axis_2[self_id] = List.empty_list(np.float64)
+                    partial_t_area_axis_projection_0[self_id] = List.empty_list(np.float64)
+                    partial_t_area_axis_projection_1[self_id] = List.empty_list(np.float64)
+                    partial_t_area_axis_projection_2[self_id] = List.empty_list(np.float64)
 
                     pore_label = worker_target[self_id]
 
@@ -713,7 +807,17 @@ def _jit_regions_to_network_parallel(
                         (max_dt_coords + s_offset) * np.array(voxel_size)
                     p_dia_local[pore_id] = 2*max_pore_dt_local
                     p_dia_global[pore_id] = 2*max_pore_dt
-                    Pn, inscribed_diameter, areas, perimeters, centers = \
+                    Pn, inscribed_diameter, areas, \
+                    areas_cuboid_transversal, \
+                    areas_cuboid_projection, \
+                    areas_largest_sphere, \
+                    areas_axis_0,\
+                    areas_axis_1,\
+                    areas_axis_2,\
+                    areas_axis_projection_0,\
+                    areas_axis_projection_1,\
+                    areas_axis_projection_2,\
+                    perimeters, centers = \
                         _get_throats(pore_im, sub_im, sub_dt, voxel_size)
                     for j in Pn:
                         if j > pore_id:
@@ -736,6 +840,15 @@ def _jit_regions_to_network_parallel(
                                                                s_offset[1]*voxel_size[1])
                             partial_t_coords_2[self_id].append(centers[j][2] +
                                                                s_offset[2]*voxel_size[2])
+                            partial_t_area_cuboid[self_id].append(areas_cuboid_transversal[j])
+                            partial_t_area_projection[self_id].append(areas_cuboid_projection[j])
+                            partial_t_area_sphere[self_id].append(areas_largest_sphere[j])
+                            partial_t_area_axis_0[self_id].append(areas_axis_0[j])
+                            partial_t_area_axis_1[self_id].append(areas_axis_1[j])
+                            partial_t_area_axis_2[self_id].append(areas_axis_2[j])
+                            partial_t_area_axis_projection_0[self_id].append(abs(areas_axis_projection_0[j]))
+                            partial_t_area_axis_projection_1[self_id].append(abs(areas_axis_projection_1[j]))
+                            partial_t_area_axis_projection_2[self_id].append(abs(areas_axis_projection_2[j]))
 
                     worker_status[self_id] = DONE
 
@@ -815,12 +928,21 @@ def _jit_regions_to_network_parallel(
                 + (net_float['pore.coords_2'][P1]-net_float['pore.coords_2'][P2])**2
                 )
     net_float['throat.direct_length'] = dist
-    net_float['throat.perimeter'] = np.array(t_perimeter)
+    net_float['throat.perimeter'] = np.array(t_perimeter, dtype=np.float64)
     net_float['pore.volume'] = p_volume
     net_float['pore.surface_area'] = p_area_surf
     A = np.array(t_area)
     net_float['throat.cross_sectional_area'] = A
     net_float['throat.equivalent_diameter'] = (4*A/np.pi)**(1/2)
+    net_float['throat.area_cuboid'] = np.array(t_area_cuboid, dtype=np.float64)
+    net_float['throat.area_projection'] = np.array(t_area_projection, dtype=np.float64)
+    net_float['throat.area_sphere'] = np.array(t_area_sphere, dtype=np.float64)
+    net_float['throat.t_area_axis_0'] = np.array(t_area_axis_0)
+    net_float['throat.t_area_axis_1'] = np.array(t_area_axis_1)
+    net_float['throat.t_area_axis_2'] = np.array(t_area_axis_2)
+    net_float['throat.t_area_axis_projection_0'] = np.array(t_area_axis_projection_0)
+    net_float['throat.t_area_axis_projection_1'] = np.array(t_area_axis_projection_1)
+    net_float['throat.t_area_axis_projection_2'] = np.array(t_area_axis_projection_2)
 
     for key, val in net_int.items():
         net_float[f"{key}_int64"] = val.view(np.float64)
@@ -861,3 +983,31 @@ def _has_border(pore_im, sub_im, neighbour_pore_label):
                 if (pore_im[x, y, z] == 0) and (sub_im[x, y, z] != neighbour_pore_label):
                     return True
     return False
+
+
+@njit
+def base_tetrahedron_area(a1, a2, a3):
+    zeros = 0
+    for i in (a1, a2, a3):
+        if i == 0:
+            zeros += 1
+    if zeros == 3:
+        return np.float64(0)
+    if zeros == 2:
+        return np.float64(max(a1, a2, a3))
+    if zeros == 1:
+        b1 = max(a1, a2, a3)
+        b2 = sum((a1, a2, a3)) - b1
+        d = np.sqrt(b1)
+        h = b2 / d
+        a = np.sqrt(d**2 + h**2) * d
+        return a
+    d = np.sqrt(np.float64(2)*a3*a2/a1)
+    h = np.sqrt(np.float64(2)*a1*a2/a3)
+    w = np.sqrt(np.float64(2)*a1*a3/a2)
+    e1 = np.sqrt(d**2 + w**2)
+    e2 = np.sqrt(h**2 + w**2)
+    e3 = np.sqrt(d**2 + h**2)
+    p = (e1 + e2 + e3)/np.float64(2)
+    a = np.sqrt(p*(p-e1)*(p-e2)*(p-e3))
+    return a
