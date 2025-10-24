@@ -704,8 +704,6 @@ def _jit_regions_to_network_parallel(
                             worker_status[worker_id] = FINISHED
                     if worker_status[worker_id] == DONE:
                         for throat_i in range(len(partial_t_conns_0[worker_id])):
-                            #if partial_t_area[worker_id][throat_i] == 0 or partial_t_perimeter[worker_id][throat_i] == 0:
-                            #    continue
                             t_conns_0.append(
                                 partial_t_conns_0[worker_id][throat_i])
                             t_conns_1.append(
@@ -821,9 +819,6 @@ def _jit_regions_to_network_parallel(
                         _get_throats(pore_im, sub_im, sub_dt, voxel_size)
                     for j in Pn:
                         if j > pore_id:
-                            #if areas[j] == 0 or perimeters[j] == 0:
-                            #    continue
-
                             partial_t_conns_0[self_id].append(pore_id)
                             partial_t_conns_1[self_id].append(j)
                             partial_t_dia_inscribed[self_id].append(
