@@ -751,7 +751,6 @@ def _save_to_stack(dt, directory, chunk_shape):
         np.save(filename, block)
         return block
     regions.map_blocks(save_block, dtype=regions.dtype).compute()
-    regions.compute()
 
 
 def _load_delayed_from_stack(directory_name, chunk_shape, divs, dtype):
