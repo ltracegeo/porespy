@@ -724,7 +724,10 @@ def snow_partitioning_parallel(im,
     regions = da.overlap.trim_internal(regions, trim_depth, boundary='none')
     # TODO: use dask ProgressBar once compatible w/ logging.
     logger.info('Applying snow to image chunks')
+    import time
+    begin = time.time()
     regions = regions.compute(num_workers=cores)
+    print("Time elapsed:", time.time() - begin)
 
     # Relabelling watershed chunks
     logger.info('Relabelling watershed chunks')
