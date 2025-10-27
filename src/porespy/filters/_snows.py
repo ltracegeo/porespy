@@ -1157,6 +1157,16 @@ def _snow_chunked(dt, r_max=5, sigma=0.4):
         peaks = trim_nearby_peaks(peaks=peaks, dt=dt)
         peaks, N = spim.label(peaks > 0)
         regions = watershed(image=-dt, markers=peaks)
+        print_memory_usage()
     else:
         regions = np.ones_like(dt2)
+        print_memory_usage()
+
     return regions * (dt > 0)
+
+def print_memory_usage():
+    import psutil
+
+    process = psutil.Process(os.getpid())
+    memory_info = process.memory_info()
+    print(f"RSS: {round(memory_info.rss / (1024**2), 2)} MB")
