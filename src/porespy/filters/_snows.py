@@ -727,7 +727,7 @@ def snow_partitioning_parallel(im,
     import time
     begin = time.time()
     regions = regions.compute(num_workers=cores)
-    print("Time elapsed:", time.time() - begin)
+    print("Dask time elapsed:", time.time() - begin)
 
     # Relabelling watershed chunks
     logger.info('Relabelling watershed chunks')
