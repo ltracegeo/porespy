@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import time
 import dask
 import dask.array as da
 import inspect as insp
@@ -724,7 +725,6 @@ def snow_partitioning_parallel(im,
     regions = da.overlap.trim_internal(regions, trim_depth, boundary='none')
     # TODO: use dask ProgressBar once compatible w/ logging.
     logger.info('Applying snow to image chunks')
-    import time
     begin = time.time()
     regions = regions.compute(num_workers=cores)
     print("Dask time elapsed:", time.time() - begin)
@@ -1150,6 +1150,7 @@ def _snow_chunked(dt, r_max=5, sigma=0.4):
     r"""
     This private version of snow is called during snow_parallel.
     """
+    begin = time.time()
     dt2 = spim.gaussian_filter(input=dt, sigma=sigma)
     peaks = find_peaks(dt=dt2, r_max=r_max)
     peaks = trim_saddle_points(peaks=peaks, dt=dt)
@@ -1159,4 +1160,6 @@ def _snow_chunked(dt, r_max=5, sigma=0.4):
         regions = watershed(image=-dt, markers=peaks)
     else:
         regions = np.ones_like(dt2)
-    return regions * (dt > 0)
+    result = regions * (dt > 0)
+    print("_snow_chunked time elapsed:", time.time() - begin, flush=True)
+    return result
