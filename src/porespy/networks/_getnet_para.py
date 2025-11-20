@@ -561,7 +561,7 @@ def _get_throats(
         )
 
 
-@njit(parallel=True, debug=False)
+@njit(parallel=True, debug=False, cache=True)
 def _jit_regions_to_network_parallel(
     im,
     dt,
