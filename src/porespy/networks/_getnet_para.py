@@ -213,6 +213,7 @@ def regions_to_network_parallel(
 
     if threads is None:
         threads = (numba.config.NUMBA_NUM_THREADS - 2) // 2
+    print(threads)
 
     im = make_contiguous(regions)
     # struc_elem = disk if im.ndim == 2 else ball
@@ -552,7 +553,7 @@ def _get_throats(
         )
 
 
-@njit(parallel=True, debug=False)
+@njit(parallel=True, debug=False, cache=True)
 def _jit_regions_to_network_parallel(
     im,
     dt,
