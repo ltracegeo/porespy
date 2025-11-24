@@ -418,12 +418,21 @@ def _get_throats(
                     (0, 0, -1, 2),
                     (0, 0, 1, 2),
                 )
-    
-    ax_neighbours = {
-        0: [(0, a, b) for a in range(-1,2) for b in range(-1,2) if (a != 0 or b != 0)],
-        1: [(a, 0, b) for a in range(-1,2) for b in range(-1,2) if (a != 0 or b != 0)],
-        2: [(a, b, 0) for a in range(-1,2) for b in range(-1,2) if (a != 0 or b != 0)],
-    }
+
+    face_areas = (
+        voxel_size[1] * voxel_size[2],
+        voxel_size[0] * voxel_size[2],
+        voxel_size[0] * voxel_size[1],
+    )
+
+    all_neighbours = (
+        (-1, 0, 0),
+        (1, 0, 0),
+        (0, -1, 0),
+        (0, 1, 0),
+        (0, 0, -1),
+        (0, 0, 1),
+    )
 
     for x in range(1, w - 1):
         for y in range(1, h - 1):
@@ -431,9 +440,8 @@ def _get_throats(
                 if pore_im[x, y, z] == 0:
                     continue
                 for dx, dy, dz, ax in face_neighbours:
-                    x2 = x + dx
-                    y2 = y + dy
-                    z2 = z + dz
+                    x2, y2, z2 = x + dx, y + dy, z + dz
+
                     if pore_im[x2, y2, z2] == 0:
                         
                         neighbour_pore_label = sub_im[x2, y2, z2]
@@ -442,9 +450,8 @@ def _get_throats(
                             continue
                         conns.add(np.int64(neighbour_pore_id))
 
-                        # Center and diameter calculations, for every throat voxel
                         dt = sub_dt[x2, y2, z2]
-                        if neighbour_pore_id in list(inscribed_diameters.keys()):
+                        if neighbour_pore_id in inscribed_diameters:
                             last_diameter = inscribed_diameters[neighbour_pore_id]
                             if dt > last_diameter:
                                 val_count[neighbour_pore_id] = 1
@@ -468,72 +475,29 @@ def _get_throats(
                         else:
                             inscribed_diameters[neighbour_pore_id] = dt
                             val_count[neighbour_pore_id] = 1
-                            centers[neighbour_pore_id] = (
-                                (x2) * voxel_size[0],
-                                (y2) * voxel_size[1],
-                                (z2) * voxel_size[2],
-                                )
-                            
-                        ### Check if is border
-                        perimeter = 0
-                        try:
-                            if (ax == 0) and (dx == 1):
-                                if _has_border(
-                                    pore_im[x2-1:x2+1, y2-1:y2+2, z2-1:z2+2],
-                                    sub_im[x2-1:x2+1, y2-1:y2+2, z2-1:z2+2],
-                                    neighbour_pore_label,
-                                    ):
-                                    perimeter = (voxel_size[1] + voxel_size[2])/2
-                            elif (ax == 0) and (dx == -1):
-                                if _has_border(
-                                    pore_im[x2:x2+2, y2-1:y2+2, z2-1:z2+2],
-                                    sub_im[x2:x2+2, y2-1:y2+2, z2-1:z2+2],
-                                    neighbour_pore_label,
-                                    ):
-                                    perimeter = (voxel_size[1] + voxel_size[2])/2
-                            elif (ax == 1) and (dy == 1):
-                                if _has_border(
-                                    pore_im[x2-1:x2+2, y2-1:y2+1, z2-1:z2+2],
-                                    sub_im[x2-1:x2+2, y2-1:y2+1, z2-1:z2+2],
-                                    neighbour_pore_label,
-                                    ):
-                                    perimeter = (voxel_size[0] + voxel_size[2])/2
-                            elif (ax == 1) and (dy == -1):
-                                if _has_border(
-                                    pore_im[x2-1:x2+2, y2:y2+2, z2-1:z2+2],
-                                    sub_im[x2-1:x2+2, y2:y2+2, z2-1:z2+2],
-                                    neighbour_pore_label,
-                                    ):
-                                    perimeter = (voxel_size[0] + voxel_size[2])/2
-                            elif (ax == 2) and (dz == 1):
-                                if _has_border(
-                                    pore_im[x2-1:x2+2, y2-1:y2+2, z2-1:z2+1],
-                                    sub_im[x2-1:x2+2, y2-1:y2+2, z2-1:z2+1],
-                                    neighbour_pore_label,
-                                    ):
-                                    perimeter = (voxel_size[0] + voxel_size[1])/2
-                            elif (ax == 2) and (dz == -1):
-                                if _has_border(
-                                    pore_im[x2-1:x2+2, y2-1:y2+2, z2:z2+2],
-                                    sub_im[x2-1:x2+2, y2-1:y2+2, z2:z2+2],
-                                    neighbour_pore_label,
-                                    ):
-                                    perimeter = (voxel_size[0] + voxel_size[1])/2
+                            centers[neighbour_pore_id] = (x2 * voxel_size[0], y2 * voxel_size[1], z2 * voxel_size[2])
 
-                        except Exception:
-                            pass
-
-                        area = voxel_size[0] * voxel_size[1] * voxel_size[2] / voxel_size[ax]
-
-                        if neighbour_pore_id in list(perimeters.keys()):
-                            perimeters[neighbour_pore_id] += perimeter
-                        else:
-                            perimeters[neighbour_pore_id] = perimeter
-
-                        if neighbour_pore_id in list(areas.keys()):
+                        area = face_areas[ax]
+                        if neighbour_pore_id in areas:
                             areas[neighbour_pore_id] += area
                         else:
                             areas[neighbour_pore_id] = area
+
+                        perimeter = 0.0
+                        for ddx, ddy, ddz in all_neighbours:
+                            x3, y3, z3 = x + ddx, y + ddy, z + ddz
+                            if sub_im[x3, y3, z3] == 0:
+                                if ddx != 0:  # Face on yz plane
+                                    perimeter += (voxel_size[1] + voxel_size[2]) / 2.0
+                                elif ddy != 0:  # Face on xz plane
+                                    perimeter += (voxel_size[0] + voxel_size[2]) / 2.0
+                                else:  # Face on xy plane
+                                    perimeter += (voxel_size[0] + voxel_size[1]) / 2.0
+
+                        if neighbour_pore_id in perimeters:
+                            perimeters[neighbour_pore_id] += perimeter
+                        else:
+                            perimeters[neighbour_pore_id] = perimeter
     return (
         list(conns),
         inscribed_diameters,
@@ -772,12 +736,3 @@ def _jit_regions_to_network(
         threads=threads,
     )
 
-@njit
-def _has_border(pore_im, sub_im, neighbour_pore_label):
-    W, H, D = pore_im.shape
-    for x in range(W):
-        for y in range(H):
-            for z in range(D):
-                if (pore_im[x, y, z] == 0) and (sub_im[x, y, z] != neighbour_pore_label):
-                    return True
-    return False
