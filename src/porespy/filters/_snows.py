@@ -4,6 +4,7 @@ import dask
 import dask.array as da
 import inspect as insp
 import logging
+import math
 import numpy as np
 from numba import njit, prange
 import scipy.ndimage as spim
@@ -713,8 +714,7 @@ def snow_partitioning_parallel(im,
 
     # Applying SNOW to image chunks
     if distributed:
-        with dask.config.set(scheduler="single-threaded"):
-            _save_to_stack(dt, "regions_npy_stack", chunk_shape)
+        _save_to_stack_numpy(dt, "regions_npy_stack", chunk_shape)
         regions = _load_delayed_from_stack("regions_npy_stack", chunk_shape, divs, dt.dtype)
     else:
         regions = da.from_array(dt, chunks=chunk_shape)
@@ -742,15 +742,60 @@ def snow_partitioning_parallel(im,
     return tup
 
 
-def _save_to_stack(dt, directory, chunk_shape):
-    regions = da.from_array(dt, chunks=chunk_shape)
+def _save_to_stack_dask(dt, directory, chunk_shape):
+    with dask.config.set(scheduler="single-threaded"):
+        regions = da.from_array(dt, chunks=chunk_shape)
+        os.makedirs(directory, exist_ok=True)
+        def save_block(block, block_info=None):
+            idx = block_info[None]["chunk-location"]
+            filename = str(Path(directory) / f"{idx[0]}-{idx[1]}-{idx[2]}.npy")
+            np.save(filename, block)
+            return block
+        regions.map_blocks(save_block, dtype=regions.dtype).compute()
+
+
+def _save_to_stack_numpy(dt, directory, chunk_shape):
+    """
+    Splits a volume into chunks and saves them to npy files
+    using only Numpy and standard libraries.
+    """
     os.makedirs(directory, exist_ok=True)
-    def save_block(block, block_info=None):
-        idx = block_info[None]["chunk-location"]
-        filename = str(Path(directory) / f"{idx[0]}-{idx[1]}-{idx[2]}.npy")
-        np.save(filename, block)
-        return block
-    regions.map_blocks(save_block, dtype=regions.dtype).compute()
+
+    # Unpack shapes
+    # Assuming 3D volume (z, y, x)
+    d_z, d_y, d_x = dt.shape
+    c_z, c_y, c_x = chunk_shape
+
+    # Calculate how many chunks are needed in each dimension
+    # math.ceil ensures we include the last partial chunk
+    n_chunks_z = math.ceil(d_z / c_z)
+    n_chunks_y = math.ceil(d_y / c_y)
+    n_chunks_x = math.ceil(d_x / c_x)
+
+    # Iterate through the grid of chunks
+    for z in range(n_chunks_z):
+        for y in range(n_chunks_y):
+            for x in range(n_chunks_x):
+                # Calculate slice start positions
+                z_start = z * c_z
+                y_start = y * c_y
+                x_start = x * c_x
+
+                # Calculate slice end positions
+                # We use min() to handle the edge of the array
+                # (e.g., if array is 100 wide and chunk is 64, end is 100, not 128)
+                z_end = min(z_start + c_z, d_z)
+                y_end = min(y_start + c_y, d_y)
+                x_end = min(x_start + c_x, d_x)
+
+                # Slice the numpy array
+                block = dt[z_start:z_end, y_start:y_end, x_start:x_end]
+
+                # Construct filename: z-y-x.npy
+                filename = Path(directory) / f"{z}-{y}-{x}.npy"
+
+                # Save
+                np.save(filename, block)
 
 
 def _load_delayed_from_stack(directory_name, chunk_shape, divs, dtype):
