@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import dask
 import dask.array as da
+import dask.distributed
 import inspect as insp
 import logging
 import math
@@ -669,6 +670,12 @@ def snow_partitioning_parallel(im,
     to view online example.
 
     """
+    try:
+        dask.distributed.get_client()  # checks for distributed context
+        distributed = True
+    except ValueError:
+        distributed = False
+
     # Adjust image shape according to specified dimension
     if isinstance(divs, int):
         divs = [divs for i in range(im.ndim)]
@@ -687,59 +694,178 @@ def snow_partitioning_parallel(im,
                 dt = dt.swapaxes(i, 0)
         logger.debug(f'Image was cropped to shape {shape}')
 
-    # Get overlap thickness from distance transform
-    chunk_shape = (np.array(shape) / np.array(divs)).astype(int)
-    logger.info('Beginning parallel SNOW algorithm...')
-
-    if overlap is None:
-        overlap = _estimate_overlap(im, mode='dt', dt=dt)
-    overlap = overlap / 2.0
-    logger.debug(f'Overlap thickness: {int(2 * overlap)} voxels')
+    logger.info('Beginning parallel SNOW algorithm with variable overlap...')
 
     if dt is None:
+        logger.info("Calculating distance transform")
         dt = edt((im > 0))
 
-    # Get overlap and trim depth of all image dimension
-    depth = {}
-    trim_depth = {}
-    for i in range(im.ndim):
-        depth[i] = int(2.0 * overlap)
-        trim_depth[i] = int(2.0 * overlap) - 1
+    # Get chunk shape
+    chunk_shape = tuple((np.array(shape) / np.array(divs)).astype(int))
 
-    try:
-        dask.distributed.get_client()  # checks for distributed context
-        distributed = True
-    except ValueError:
-        distributed = False
+    # --- Start of new variable overlap logic ---
 
-    # Applying SNOW to image chunks
+    # 1. Pre-compute Local Radii for each chunk's 3x3x3 neighborhood
+    logger.info("Step 1 of 5: Pre-computing max radii for each chunk...")
     if distributed:
         _save_to_stack_numpy(dt, "regions_npy_stack", chunk_shape)
-        regions = _load_delayed_from_stack("regions_npy_stack", chunk_shape, divs, dt.dtype)
+        dt_chunks = _load_delayed_from_stack("regions_npy_stack", chunk_shape, divs, dt.dtype)
     else:
-        regions = da.from_array(dt, chunks=chunk_shape)
-    regions = da.overlap.overlap(regions, depth=depth, boundary='none')
-    regions = regions.map_blocks(_snow_chunked, r_max=r_max,
-                                 sigma=sigma, dtype=dt.dtype)
-    regions = da.overlap.trim_internal(regions, trim_depth, boundary='none')
-    # TODO: use dask ProgressBar once compatible w/ logging.
-    logger.info('Applying snow to image chunks')
-    regions = regions.compute(num_workers=cores)
+        dt_chunks = da.from_array(dt, chunks=chunk_shape)
+    max_radii_orig = _compute_max_radii_numpy(dt, divs, chunk_shape)
+    footprint = np.ones((3,) * im.ndim)
+    max_radii_map = spim.maximum_filter(max_radii_orig, footprint=footprint, mode='constant', cval=0)
+    logger.info("Step 1 of 5: Done.")
 
-    # Relabelling watershed chunks
-    logger.info('Relabelling watershed chunks')
+    # Add a warning if the overlap is getting too large compared to chunk size
+    largest_radius = max_radii_map.max()
+    min_chunk_dim = min(chunk_shape)
+    if largest_radius > min_chunk_dim / 2:
+        logger.warning(
+            f"The largest feature radius ({largest_radius:.2f}) is more than "
+            f"half the smallest chunk dimension ({min_chunk_dim})."
+        )
+
+    # 2. Build Dask graph for chunk processing
+    logger.info("Step 2 of 5: Building Dask graph for chunk processing...")
+    lazy_results = []
+    divs_array = np.array(divs)
+    for chunk_idx in np.ndindex(tuple(divs_array)):
+        chunk_with_overlap, overlaps = _get_chunk_with_overlap(dt_chunks, chunk_idx, chunk_shape, max_radii_map)
+
+        task = _process_chunk_delayed(
+            chunk_with_overlap=chunk_with_overlap,
+            chunk_idx=chunk_idx,
+            overlaps=overlaps,
+            r_max=r_max,
+            sigma=sigma,
+        )
+        lazy_results.append(task)
+    logger.info("Step 2 of 5: Done.")
+
+    # 3. Compute the results in parallel
+    logger.info("Step 3 of 5: Executing Dask graph...")
+    results_list = dask.compute(*lazy_results, num_workers=cores)
+    logger.info("Step 3 of 5: Done.")
+
+    # 4. Reassemble the image from processed chunks
+    logger.info("Step 4 of 5: Reassembling image from chunks...")
+    regions = np.zeros(np.array(shape) + 2 * np.array(divs) - 2, dtype=np.int32)
+
+    for chunk_data, chunk_idx in results_list:
+        s_ = []
+        for i in range(im.ndim):
+            start = chunk_idx[i] * (chunk_shape[i] + 2)
+            start -= np.array(start > 0, np.int)
+            end = start + chunk_data.shape[i]
+            s_.append(slice(start, end))
+
+        regions[tuple(s_)] = chunk_data
+
     regions = relabel_chunks(im=regions, chunk_shape=chunk_shape)
+    logger.info("Step 4 of 5: Done.")
 
-    # Stitching watershed chunks
-    logger.info('Stitching watershed chunks')
+    logger.info("Step 5 of 5: Stitching chunk boundaries...")
     regions = _watershed_stitching(im=regions, chunk_shape=chunk_shape)
+    logger.info("Step 5 of 5: Done.")
+
     tup = Results()
     tup.im = im
     tup.dt = dt
     tup.regions = regions
-
-
     return tup
+
+def _get_chunk_with_overlap(dt_chunks, chunk_idx, chunk_shape, max_radii_map):
+    required_overlap = int(np.ceil(max_radii_map[chunk_idx]))
+    overlaps = np.zeros((dt_chunks.ndim, 2), dtype=int)
+    for i in range(dt_chunks.ndim):
+        if chunk_idx[i] > 0:
+            overlaps[i, 0] = required_overlap
+        if chunk_idx[i] < max_radii_map.shape[i] - 1:
+            overlaps[i, 1] = required_overlap
+
+    return _get_chunk_with_variable_overlap(dt_chunks, chunk_idx, chunk_shape, overlaps), overlaps
+
+def _get_chunk_with_variable_overlap(dt, chunk_idx, chunk_shape, overlaps):
+    """
+    Extracts a chunk from the main image `dt` with the specified variable
+    overlap on each face.
+    """
+    s_ = []
+    for i in range(dt.ndim):
+        start = chunk_idx[i] * chunk_shape[i]
+        end = start + chunk_shape[i]
+        s_start = start - overlaps[i, 0]
+        s_end = end + overlaps[i, 1]
+        s_.append(slice(max(0, s_start), min(dt.shape[i], s_end)))
+    return dt[tuple(s_)]
+
+
+def _trim_variable_overlap(chunk, overlaps):
+    """
+    Trims the processed chunk to remove the variable overlap.
+    """
+    s_ = []
+    for i in range(chunk.ndim):
+        # Trimm but let 1 voxel border
+        start = overlaps[i, 0]
+        end = chunk.shape[i] - overlaps[i, 1]
+        start -= np.array(overlaps[i, 0] != 0, int)
+        end += np.array(overlaps[i, 1] != 0, int)
+        s_.append(slice(start, end))
+    return chunk[tuple(s_)]
+
+
+def _compute_max_radii_numpy(dt, divs, chunk_shape):
+    """
+    Computes the maximum value within each chunk of a numpy array.
+
+    This function is a numpy-only replacement for dask's:
+    `da.from_array(dt, chunks=chunk_shape).map_blocks(np.max).compute()`
+
+    Parameters
+    ----------
+    dt : ndarray
+        The input numpy array (distance transform).
+    divs : tuple or list
+        The number of divisions along each axis.
+    chunk_shape : tuple
+        The shape of a single chunk.
+
+    Returns
+    -------
+    ndarray
+        An array where each element is the maximum value of the
+        corresponding chunk in the input array. The shape of the array
+        will be equal to `divs`.
+    """
+    max_radii = np.zeros(divs, dtype=dt.dtype)
+    for index in np.ndindex(tuple(divs)):
+        s_ = []
+        for i in range(dt.ndim):
+            start = index[i] * chunk_shape[i]
+            end = start + chunk_shape[i]
+            s_.append(slice(start, end))
+        chunk = dt[tuple(s_)]
+        if chunk.size > 0:
+            max_radii[index] = np.max(chunk)
+        else:
+            max_radii[index] = 0
+    return max_radii
+
+@dask.delayed
+def _process_chunk_delayed(chunk_with_overlap, chunk_idx, overlaps, r_max, sigma):
+    """
+    A dask.delayed function that processes a single numpy chunk.
+    Dask computes the chunk with overlap and passes it here as a numpy array.
+    """
+    # Process the chunk using the core SNOW logic
+    processed_chunk = _snow_chunked(chunk_with_overlap, r_max=r_max, sigma=sigma)
+
+    # Trim the processed chunk to remove overlap
+    trimmed_chunk = _trim_variable_overlap(processed_chunk, overlaps)
+
+    return trimmed_chunk, chunk_idx
 
 
 def _save_to_stack_dask(dt, directory, chunk_shape):
@@ -988,7 +1114,7 @@ def _watershed_stitching(im, chunk_shape):
         if num > 1:
             im = im.swapaxes(0, axis)
             for i in range(1, num):
-                sl = i * (chunk_shape[axis] + 3) - (i - 1)
+                sl = i * (chunk_shape[axis] + 2) - (i - 1)
                 sl1 = im[sl - 3, ...]
                 sl1_mask = sl1 > 0
                 sl2 = im[sl - 1, ...] * sl1_mask
