@@ -212,7 +212,7 @@ def regions_to_network_parallel(
     vertex_index_array = vertex_index_array.reshape((2, 2, 2), order="F")
 
     if threads is None:
-        threads = (numba.config.NUMBA_NUM_THREADS - 2) // 2
+        threads = max((numba.config.NUMBA_NUM_THREADS - 2) // 2, 2)
 
     im = make_contiguous(regions)
     # struc_elem = disk if im.ndim == 2 else ball
