@@ -19,6 +19,8 @@ __all__ = [
     "tic",
     "toc",
     "get_edt",
+    "get_edt_cpu",
+    "get_jit_edt_cpu",
     "get_skel",
     "parse_shape",
     "get_fixtures_path",

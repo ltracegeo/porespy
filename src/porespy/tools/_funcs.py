@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import scipy.ndimage as spim
 from numba import boolean, njit
-from skimage.morphology import ball, diskdisk
+from skimage.morphology import ball, disk
 from skimage.segmentation import relabel_sequential
 
 from ._utils import Results, Settings, get_edt, get_tqdm
