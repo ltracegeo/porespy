@@ -1139,10 +1139,10 @@ def _watershed_stitching(im, chunk_shape):
         if num > 1:
             im = im.swapaxes(0, axis)
             for i in range(1, num):
-                sl = i * (chunk_shape[axis] + 2) - (i - 1)
-                sl1 = im[sl - 3, ...]
+                sl = i * (chunk_shape[axis] + 2)
+                sl1 = im[sl - 2, ...]
                 sl1_mask = sl1 > 0
-                sl2 = im[sl - 1, ...] * sl1_mask
+                sl2 = im[sl - 0, ...] * sl1_mask
                 sl1_labels = sl1.flatten()[sl1.flatten() > 0]
                 sl2_labels = sl2.flatten()[sl2.flatten() > 0]
                 if sl1_labels.size != sl2_labels.size:
