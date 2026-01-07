@@ -1131,7 +1131,7 @@ def _watershed_stitching(im, chunk_shape):
 
     """
     c_shape = np.array(chunk_shape)
-    cuts_num = (np.array(im.shape) / c_shape).astype(np.uint32)
+    cuts_num = (np.array(im.shape) / (c_shape + 2)).astype(np.uint32)
 
     for axis, num in enumerate(cuts_num):
         keys = []
