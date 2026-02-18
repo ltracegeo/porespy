@@ -229,8 +229,7 @@ def snow2(
                 parallel_kw=parallel_kw,
             )
         else:
-            snow = snow_partitioning(im=phase, sigma=sigma[i], r_max=r_max,
-                                     peaks=pk)
+            snow = snow_partitioning(im=phase, sigma=sigma[i], r_max=r_max)
         if regions is None:
             regions = np.zeros_like(snow.regions, dtype=int)
         # Note: Using snow.regions > 0 here instead of phase is needed to
