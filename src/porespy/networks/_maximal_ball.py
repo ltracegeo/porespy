@@ -45,7 +45,7 @@ def maximal_ball_wrapper(im, prefix, path_to_exe, voxel_size=1e-6):
         msg = "The imageio package can be installed with pip install imageio"
         raise ModuleNotFoundError(msg)
     file = os.path.splitext(prefix)[0]
-    imageio.volsave(file + ".tif", np.array(im.astype("uint8")))
+    imageio.volsave(file + ".tif", np.array(im.astype(np.uint8)))
     with open(f"{file}.mhd", "w") as f:
         f.write("ObjectType =  Image\n\
                  NDims =	   3 \n\
