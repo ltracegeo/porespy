@@ -147,7 +147,7 @@ def magnet(
         sk, im = skeleton(im, surface, parallel_kw)  # take skeleton
     else:
         if im.ndim == 3:
-            _check_skeleton_health(sk.astype("bool"))
+            _check_skeleton_health(sk.astype(bool))
     # take distance transform
     dt = edt(im)
     # find junctions
@@ -164,7 +164,7 @@ def magnet(
         mode = throat_junctions
         ftj = find_throat_junctions(im, sk, juncs, throats, dt, l_max, mode)
         # add throat juncs to juncs
-        juncs = ftj.new_juncs.astype("bool") + juncs
+        juncs = ftj.new_juncs.astype(bool) + juncs
         # get new throats
         throats = ftj.new_throats
     # use walk to get throat area
@@ -246,11 +246,11 @@ def skeleton(im, surface=False, parallel_kw=None):
         im = trim_floating_solid(im, conn="min", incl_surface=surface)
     # perform skeleton
     if parallel_kw is None:  # serial
-        sk = skeletonize(im).astype("bool")
+        sk = skeletonize(im).astype(bool)
     if parallel_kw is not None:  # parallel
         sk = skeleton_parallel(im, parallel_kw)
     if im.ndim == 3:
-        _check_skeleton_health(sk.astype("bool"))
+        _check_skeleton_health(sk.astype(bool))
     return sk, im
 
 
@@ -886,7 +886,7 @@ def _check_skeleton_health(sk):
         detected a warning is triggered.
     """
     sk = np.pad(sk, 1)  # pad by 1 void voxel to avoid false warning
-    _, N = spim.label(input=~sk.astype("bool"))
+    _, N = spim.label(input=~sk.astype(bool))
     N_shells = N - 1
     if N_shells > 0:
         logger.warning(

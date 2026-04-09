@@ -303,7 +303,7 @@ def to_paraview(im, filename, phase=2):
             " dependency in porespy."
         )
         raise ModuleNotFoundError(msg)
-    data = im.astype("uint8")
+    data = im.astype(np.uint8)
     file = os.path.splitext(filename)[0]
     path = file + ".tiff"
     if len(im.shape) == 2:
