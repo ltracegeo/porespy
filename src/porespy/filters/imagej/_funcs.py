@@ -49,7 +49,7 @@ def imagej_wrapper(im, plugin_name, path):  # pragma: no cover
 
     i = False
     ij = imagej.init(path, headless=False)
-    img = 255 * np.array(im.astype("uint8"))
+    img = 255 * np.array(im.astype(np.uint8))
     WindowManager = jimport("ij.WindowManager")
     ij.ui().show("Image", ij.py.to_java(img))
     plugin = "Duplicate..."
@@ -148,7 +148,7 @@ def imagej_plugin(im, path, plugin_name, args=None):  # pragma: no cover
                " dependency in porespy.")
         logger.critical(msg)
     ij = imagej.init(path, headless=False)
-    img = 255 * np.array(im.astype("uint8"))
+    img = 255 * np.array(im.astype(np.uint8))
     WindowManager = jimport('ij.WindowManager')
     ij.ui().show('Image', ij.py.to_java(img))
     plugin = 'Duplicate...'
