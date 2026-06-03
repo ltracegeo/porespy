@@ -103,7 +103,7 @@ def to_vtk(im, filename, divide=False, downsample=False, voxel_size=1, vox=False
         im = im.astype(np.int8)
     vs = voxel_size
     if divide:
-        split = np.round(im.shape[2] / 2).astype(np.int)
+        split = np.round(im.shape[2] / 2).astype(int)
         im1 = im[:, :, 0:split]
         im2 = im[:, :, split:]
         imageToVTK(f"{filename}_1",
@@ -262,7 +262,7 @@ def to_stl(im, filename, divide=False, downsample=False, voxel_size=1, vox=False
         im = im.astype(np.int8)
     vs = voxel_size
     if divide:
-        split = np.round(im.shape[2] / 2).astype(np.int)
+        split = np.round(im.shape[2] / 2).astype(int)
         im1 = im[:, :, 0:split]
         im2 = im[:, :, split:]
         _save_stl(im1, vs, f"{filename}_1")
