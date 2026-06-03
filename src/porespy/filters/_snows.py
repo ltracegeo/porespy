@@ -756,7 +756,7 @@ def snow_partitioning_parallel(im,
         s_ = []
         for i in range(im.ndim):
             start = chunk_idx[i] * (chunk_shape[i] + 2)
-            start -= np.array(start > 0, np.int)
+            start -= np.array(start > 0, int)
             end = start + chunk_data.shape[i]
             s_.append(slice(start, end))
 
