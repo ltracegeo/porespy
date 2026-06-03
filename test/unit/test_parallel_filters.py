@@ -1,7 +1,7 @@
 import numpy as np
 import porespy as ps
 import scipy.ndimage as spim
-from skimage.morphology import skeletonize_3d
+from skimage.morphology import skeletonize
 try:
     from pyedt import edt
 except ModuleNotFoundError:
