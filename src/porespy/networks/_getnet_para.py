@@ -387,12 +387,6 @@ def _get_throats(
                     (0, 0, -1, 2),
                     (0, 0, 1, 2),
                 )
-    
-    ax_neighbours = {
-        0: [(0, a, b) for a in range(-1,2) for b in range(-1,2) if (a != 0 or b != 0)],
-        1: [(a, 0, b) for a in range(-1,2) for b in range(-1,2) if (a != 0 or b != 0)],
-        2: [(a, b, 0) for a in range(-1,2) for b in range(-1,2) if (a != 0 or b != 0)],
-    }
 
     for x in range(1, w - 1):
         for y in range(1, h - 1):
