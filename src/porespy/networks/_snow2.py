@@ -210,15 +210,16 @@ def snow2(
         vals = vals[vals > 0]
     if peaks is not None:
         parallel_kw = None
+    overlaps = {}
     for i in vals:
         phase = phases == i
         if force_cpu:
             phase_dt = jit_edt_cpu(phase)
         else:
             phase_dt = None
-        overlap, chunk = estimate_overlap_and_chunk(phase, dt=phase_dt)
+        overlaps[i], chunk = estimate_overlap_and_chunk(phase, dt=phase_dt)
         # TODO: this may not be the overlap the user provides!
-        if (overlap > (chunk//2 - 1)).any():
+        if (overlaps[i] > (chunk//2 - 1)).any():
             parallel_kw = None
             logger.warning("Disabling paralelization as overlap exceeds than chunk size.")
     if type(sigma) is not dict:
@@ -241,7 +242,7 @@ def snow2(
                 sigma=sigma[i],
                 r_max=r_max,
                 parallel_kw=parallel_kw,
-                overlap=overlap,
+                overlap=overlaps[i],
                 dt=dt,
             )
         else:
