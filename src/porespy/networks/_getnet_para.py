@@ -1,4 +1,7 @@
 import logging
+from math import sqrt
+
+import numba
 import numpy as np
 import numba
 from numba import njit, prange, gdb
@@ -374,7 +377,6 @@ def _get_throats(
     w, h, d = pore_im.shape
     conns = set()
     inscribed_diameters = {-1: 0.}
-    areas = {-1: 0.}
     perimeters = {-1: 0.}
     centers = {-1: (0., 0., 0.)}
     val_count = Dict()
@@ -388,10 +390,10 @@ def _get_throats(
                     (0, 0, 1, 2),
                 )
     
-    ax_neighbours = {
-        0: [(0, a, b) for a in range(-1,2) for b in range(-1,2) if (a != 0 or b != 0)],
-        1: [(a, 0, b) for a in range(-1,2) for b in range(-1,2) if (a != 0 or b != 0)],
-        2: [(a, b, 0) for a in range(-1,2) for b in range(-1,2) if (a != 0 or b != 0)],
+    areas_projections = {
+        0: {-1: 0.},
+        1: {-1: 0.},
+        2: {-1: 0.},
     }
 
     for x in range(1, w - 1):
@@ -493,63 +495,32 @@ def _get_throats(
                             pass
 
                         area = voxel_size[0] * voxel_size[1] * voxel_size[2] / voxel_size[ax]
-                        """
-                        # get pseudo-projection
-                        if throat_perimeter_mode == "original":
-                            projection = np.ones((3, 3), dtype=np.uint8)
-                        else:
-                            projection = np.zeros((3, 3), dtype=np.uint8)
-                            projection[1, 1] = 1
-
-                        for dx2, dy2, dz2, px, py in lateral_columns_generator(ax):
-                            x3 = x2 + dx2
-                            y3 = y2 + dy2
-                            z3 = z2 + dz2
-
-                            if (x3 < 0 or x3 >= w) or \
-                                    (y3 < 0 or y3 >= h) or \
-                                    (z3 < 0 or z3 >= d):
-                                continue
-
-                            if throat_perimeter_mode == "original":
-                                if sub_im[x3, y3, z3] == 0:
-                                    projection[px, py] = 0
-                            else:
-                                if sub_im[x3, y3, z3] != (val + 1):
-                                    pass
-                                elif _is_throat(pore_im, x3, y3, z3):
-                                    projection[px, py] = 1
-
-                        if ax == 0:
-                            projection_size = (voxel_size[1], voxel_size[2])
-                        elif ax == 1:
-                            projection_size = (voxel_size[0], voxel_size[2])
-                        elif ax == 2:
-                            projection_size = (voxel_size[0], voxel_size[1])
-                        perimeter, area = jit_marching_squares_perimeter_and_area(
-                            projection,
-                            target_label=1,
-                            spacing=projection_size,
-                            overlap=True,
-                            )
-                        """
 
                         if neighbour_pore_id in list(perimeters.keys()):
                             perimeters[neighbour_pore_id] += perimeter
                         else:
                             perimeters[neighbour_pore_id] = perimeter
 
-                        if neighbour_pore_id in list(areas.keys()):
-                            areas[neighbour_pore_id] += area
+                        if neighbour_pore_id in list(areas_projections[ax].keys()):
+                            areas_projections[ax][neighbour_pore_id] += area
                         else:
-                            areas[neighbour_pore_id] = area
+                            areas_projections[ax][neighbour_pore_id] = area
+
+    areas = {-1: 0.}
+    for pore_id in list(inscribed_diameters.keys()):
+        projection_sum = 0.0
+        for axis in list(areas_projections.keys()):
+            projection = areas_projections[axis].get(pore_id, 0.)
+            projection_sum += projection**2
+        areas[pore_id] = sqrt(projection_sum)
+
     return (
         list(conns),
         inscribed_diameters,
         areas,
         perimeters,
         centers,
-        )
+    )
 
 
 @njit(parallel=True, debug=False, cache=True)
@@ -722,11 +693,7 @@ def _jit_regions_to_network_parallel(
                             partial_t_dia_inscribed[self_id].append(
                                 inscribed_diameter[j])
                             partial_t_perimeter[self_id].append(perimeters[j])
-                            if inscribed_diameter[j] > (max(voxel_size)):
-                                partial_t_area[self_id].append(areas[j])
-                            else:
-                                area = 4 * (inscribed_diameter[j]) ** 2
-                                partial_t_area[self_id].append(area)
+                            partial_t_area[self_id].append(areas[j])
                             partial_t_coords_0[self_id].append(centers[j][0] +
                                                                s_offset[0]*voxel_size[0])
                             partial_t_coords_1[self_id].append(centers[j][1] +
