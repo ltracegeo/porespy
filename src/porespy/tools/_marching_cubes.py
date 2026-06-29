@@ -1,11 +1,22 @@
-import os
-import math
 import itertools
+import math
+import os
 from pathlib import Path
-from numba import njit
+
 import numpy as np
-from skimage import measure
+from numba import njit
 from scipy import spatial
+from skimage import measure
+
+__all__ = [
+    'face_orientation',
+    'area_of_triangle',
+    'mc_templates_generator',
+    'create_mc_template_list',
+    'calculate_area_and_volume',
+    'marching_cubes_area_and_volume',
+    'jit_marching_cubes_area_and_volume',
+]
 
 
 MC_TEMPLATES_FILENAME = 'marching_cubes_templates.dat'
@@ -82,9 +93,12 @@ def mc_templates_generator(override=False):
 
 def create_mc_template_list(spacing=(1, 1, 1)):
     '''
-    Return area and volume lists for the marching cubes templates
-    Reads the templates file
-    Input:
+    Return area and volume lists for the marching cubes templates. Reads the
+    templates file.
+
+    Parameters
+    ----------
+    spacing : tuple, optional
         Tuple with three values for x, y, and z lengths of the voxel edges
     '''
     mc_templates_generator()

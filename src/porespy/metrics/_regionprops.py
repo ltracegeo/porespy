@@ -1,20 +1,19 @@
 import logging
+
 import numpy as np
 import scipy.ndimage as spim
 from pandas import DataFrame
-from porespy.tools import extract_subsection, bbox_to_slices
-from skimage.measure import mesh_surface_area
-from skimage.morphology import skeletonize_3d, ball
-from skimage.measure import regionprops
+from skimage.measure import mesh_surface_area, regionprops
 from skimage.measure._regionprops import RegionProperties
+from skimage.morphology import ball, skeletonize
+
+from porespy.tools import bbox_to_slices, extract_subsection, get_edt
+
 try:
     from skimage.measure import marching_cubes
 except ImportError:
     from skimage.measure import marching_cubes_lewiner as marching_cubes
-try:
-    from pyedt import edt
-except ModuleNotFoundError:
-    from edt import edt
+
 
 
 __all__ = [
@@ -24,6 +23,7 @@ __all__ = [
 ]
 
 
+edt = get_edt()
 logger = logging.getLogger(__name__)
 
 
@@ -58,7 +58,7 @@ def props_to_DataFrame(regionprops):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/metrics/reference/props_to_DataFrame.html>`_
+    <https://porespy.org/examples/metrics/reference/props_to_DataFrame.html>`__
     to view online example.
 
     """
@@ -117,7 +117,7 @@ def prop_to_image(regionprops, shape, prop):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/metrics/reference/prop_to_image.html>`_
+    <https://porespy.org/examples/metrics/reference/prop_to_image.html>`__
     to view online example.
 
     """
@@ -194,7 +194,7 @@ def regionprops_3D(im):
             as the region to the actual surface area of the region.
 
         'skeleton'
-            The medial axis of the region obtained using the ``skeletonize_3D``
+            The medial axis of the region obtained using the ``skeletonize``
             method from **skimage**.
 
         'convex_volume'
@@ -213,7 +213,7 @@ def regionprops_3D(im):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/metrics/reference/regionprops_3D.html>`_
+    <https://porespy.org/examples/metrics/reference/regionprops_3D.html>`__
     to view online example.
 
     """
@@ -277,7 +277,7 @@ class RegionPropertiesPS(RegionProperties):
 
     @property
     def skeleton(self):
-        return skeletonize_3d(self.mask)
+        return skeletonize(self.mask)
 
     @property
     def surface_area(self):

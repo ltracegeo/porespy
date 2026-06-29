@@ -1,58 +1,42 @@
 name: Test Duration Logger
 
-on: [workflow_dispatch]
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 1 * *" # First day of every month
 
 jobs:
-  build:
-
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash -l {0}
-
-    strategy:
-      max-parallel: 1
-      matrix:
-        python-version: ['3.10']
-        os: [ubuntu-latest]
+  log-durations:
+    runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
         with:
-          python-version: ${{ matrix.python-version }}
+          ref: dev
+          token: ${{ secrets.PAT }}
 
-      - name: Cache pip
-        uses: actions/cache@v4
+      - uses: astral-sh/setup-uv@v7
         with:
-          # This path is specific to Ubuntu
-          path: ~/.cache/pip
-          # Look to see if there is a cache hit for the corresponding requirements file
-          key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-            ${{ runner.os }}-
+          enable-cache: true
+          cache-dependency-glob: "**/pyproject.toml"
+          python-version: "3.13"
 
-      - name: Install dependencies (pip)
-        run: |
-          pip install -e .[test,extras]
+      - name: Install dependencies
+        run: uv sync --group test --extra extras
 
-      - name: Running unit tests and examples
+      - name: Run tests
         run: |
           rm test/fixtures/.test_durations*
-          pytest \
-            --nbval-lax examples/ \
-            --store-durations \
-            --durations-path test/fixtures/.test_durations_examples
-          pytest test/ \
-            --store-durations \
-            --durations-path test/fixtures/.test_durations_unit
+          uv run pytest --nbval-lax examples/ --store-durations --durations-path test/fixtures/.test_durations_examples
+          uv run pytest test/ --store-durations --durations-path test/fixtures/.test_durations_unit
 
-      - name: Committing test duration files
-        uses: EndBug/add-and-commit@v9
-        with:
-          add: 'test/fixtures'
-          author_name: github-actions
-          author_email: actions@github.com
-          message: 'Updated test duration files.'
+      - name: Configure Git
+        run: |
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+
+      - name: Commit and push
+        run: |
+          git add test/fixtures/.test_durations*
+          git commit -m "test: Update test duration log [no ci]"
+          git push

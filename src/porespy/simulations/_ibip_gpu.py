@@ -1,21 +1,15 @@
+import inspect
 import logging
+
 import numpy as np
-from porespy.tools import (
-    get_tqdm,
-    get_border,
-    Results,
-)
-try:
-    from pyedt import edt
-except ModuleNotFoundError:
-    from edt import edt
+
+from porespy.tools import Results, get_edt, get_tqdm, settings
+from porespy.generators import borders
+
+__all__ = ["ibip_gpu"]
 
 
-__all__ = [
-    "ibip_gpu",
-]
-
-
+edt = get_edt()
 tqdm = get_tqdm()
 logger = logging.getLogger(__name__)
 
@@ -48,11 +42,11 @@ def ibip_gpu(im, dt=None, inlets=None, maxiter=10000):  # pragma: no cover
     results : Results object
         A custom object with the following two arrays as attributes:
 
-        'inv_sequence'
+        'im_seq'
             An ndarray the same shape as ``im`` with each voxel labelled by
             the sequence at which it was invaded.
 
-        'inv_size'
+        'im_size'
             An ndarray the same shape as ``im`` with each voxel labelled by
             the ``inv_size`` at which was filled.
 
@@ -63,22 +57,21 @@ def ibip_gpu(im, dt=None, inlets=None, maxiter=10000):  # pragma: no cover
     im_gpu = cp.array(im)
     dt = edt(cp.asnumpy(im)) if dt is None else dt
     dt_gpu = cp.array(dt)
-    inlets = get_border(shape=im.shape) if inlets is None else inlets
+    inlets = borders(shape=im.shape) if inlets is None else inlets
     inlets_gpu = cp.array(inlets)
     bd_gpu = cp.copy(inlets_gpu > 0)
     dt_gpu = dt_gpu.astype(int)
 
     # Alternative to _ibip
-    inv_gpu = -1*((~im_gpu).astype(int))
-    sizes_gpu = -1*((~im_gpu).astype(int))
+    inv_gpu = -1 * ((~im_gpu).astype(int))
+    sizes_gpu = -1 * ((~im_gpu).astype(int))
     strel_gpu = ball_gpu if im_gpu.ndim == 3 else disk_gpu
-
-    for step in tqdm(range(1, maxiter)):
-        temp_gpu = cndi.binary_dilation(input=bd_gpu,
-                                        structure=strel_gpu(1, smooth=False))
+    desc = inspect.currentframe().f_code.co_name  # Get current func name
+    for step in tqdm(range(1, maxiter), desc=desc, **settings.tqdm):
+        temp_gpu = cndi.binary_dilation(input=bd_gpu, structure=strel_gpu(1, smooth=False))
         edge_gpu = temp_gpu * (dt_gpu > 0)
         if ~cp.any(edge_gpu):
-            logger.info('No more accessible invasion sites found')
+            logger.info("No more accessible invasion sites found")
             break
         # Find the maximum value of the dt underlaying the new edge
         r_max_gpu = dt_gpu[edge_gpu].max()
@@ -87,8 +80,9 @@ def ibip_gpu(im, dt=None, inlets=None, maxiter=10000):  # pragma: no cover
         # Insert the disk/sphere
         pt_gpu = cp.where(edge_gpu * dt_thresh_gpu)  # will be used later in updating bd
         # Update inv image
-        bi_dial_gpu = cndi.binary_dilation(input=edge_gpu*dt_thresh_gpu,
-                                           structure=strel_gpu(r_max_gpu.item()))
+        bi_dial_gpu = cndi.binary_dilation(
+            input=edge_gpu * dt_thresh_gpu, structure=strel_gpu(r_max_gpu.item())
+        )
         bi_dial_step_gpu = bi_dial_gpu * step
         inv_prev_gpu = cp.copy(inv_gpu)
         mask_inv_prev_gpu = ~(inv_prev_gpu > 0)
@@ -104,7 +98,7 @@ def ibip_gpu(im, dt=None, inlets=None, maxiter=10000):  # pragma: no cover
         bd_gpu[pt_gpu] = True
         dt_gpu[pt_gpu] = 0
         if step == (maxiter - 1):  # If max_iters reached, end loop
-            logger.info('Maximum number of iterations reached')
+            logger.info("Maximum number of iterations reached")
             break
 
     temp_gpu = inv_gpu == 0
@@ -117,8 +111,8 @@ def ibip_gpu(im, dt=None, inlets=None, maxiter=10000):  # pragma: no cover
     inv_sequence = cp.asnumpy(inv_seq_gpu)
     inv_size = cp.asnumpy(sizes_gpu)
     results = Results()
-    results.inv_sequence = inv_sequence
-    results.inv_size = inv_size
+    results.im_seq = inv_sequence
+    results.im_size = inv_size
     return results
 
 
@@ -140,6 +134,7 @@ def rankdata_gpu(im_arr):  # pragma: no cover
 
     """
     import cupy as cp
+
     arr = cp.ravel(im_arr)
     sorter = cp.argsort(arr)
     inv = cp.empty(sorter.size, dtype=cp.intp)
@@ -199,11 +194,12 @@ def ball_gpu(radius, smooth=True):  # pragma: no cover
 
     """
     import cupy as cp
+
     n = 2 * radius + 1
-    Z, Y, X = cp.mgrid[-radius:radius:n * 1j,
-                       -radius:radius:n * 1j,
-                       -radius:radius:n * 1j]
-    s = X ** 2 + Y ** 2 + Z ** 2
+    Z, Y, X = cp.mgrid[
+        -radius : radius : n * 1j, -radius : radius : n * 1j, -radius : radius : n * 1j
+    ]
+    s = X**2 + Y**2 + Z**2
     if smooth:
         radius = radius - 0.001
     return s <= radius * radius
@@ -229,14 +225,16 @@ def disk_gpu(radius, smooth=True):  # pragma: no cover
 
     """
     import cupy as cp
+
     L = cp.arange(-radius, radius + 1)
     X, Y = cp.meshgrid(L, L)
     if smooth:
         radius = radius - 0.001
-    return (X ** 2 + Y ** 2) <= radius ** 2
+    return (X**2 + Y**2) <= radius**2
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import porespy as ps
+
     im = ps.generators.blobs(shape=[200, 200])
     out = ps.filters.ibip_gpu(im=im)

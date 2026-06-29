@@ -1,8 +1,9 @@
-import numpy as np
-from skimage.restoration.non_local_means import denoise_nl_means
-from skimage.restoration import estimate_sigma
-from skimage.exposure import rescale_intensity, match_histograms
 import dask
+import numpy as np
+from skimage.exposure import match_histograms, rescale_intensity
+from skimage.restoration import estimate_sigma
+from skimage.restoration.non_local_means import denoise_nl_means
+
 dask.config.set(scheduler="threads")
 # from dask.diagnostics import ProgressBar
 
@@ -55,7 +56,7 @@ def nl_means_layered(im, cores=None, axis=0, patch_size=5, patch_distance=5, h=4
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/filters/reference/nl_means_layered.html>`_
+    <https://porespy.org/examples/filters/reference/nl_means_layered.html>`__
     to view online example.
 
     """

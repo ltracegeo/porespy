@@ -1,16 +1,15 @@
 import os
 import subprocess
+
 import numpy as np
 import scipy.ndimage as nd
 import skimage.measure as ms
-from skimage.morphology import ball
-from porespy.filters import reduce_peaks
-from porespy.networks import generate_voxel_image
-from porespy.tools import sanitize_filename
-try:
-    from pyedt import edt
-except ModuleNotFoundError:
-    from edt import edt
+
+from porespy.tools import get_edt, sanitize_filename
+
+edt = get_edt()
+
+__all__ = ["to_vtk", "dict_to_vtk", "to_palabos", "to_stl", "to_paraview", "open_paraview"]
 
 
 def dict_to_vtk(data, filename, voxel_size=1, origin=(0, 0, 0)):
@@ -37,14 +36,14 @@ def dict_to_vtk(data, filename, voxel_size=1, origin=(0, 0, 0)):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/io/reference/dict_to_vtk.html>`_
+    <https://porespy.org/examples/io/reference/dict_to_vtk.html>`__
     to view online example.
 
     """
     try:
         from pyevtk.hl import imageToVTK
     except ModuleNotFoundError:
-        msg = 'The pyevtk package can be installed with pip install pyevtk'
+        msg = "The pyevtk package can be installed with pip install pyevtk"
         raise ModuleNotFoundError(msg)
     vs = voxel_size
     for entry in data:
@@ -86,14 +85,14 @@ def to_vtk(im, filename, divide=False, downsample=False, voxel_size=1, vox=False
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/io/reference/to_vtk.html>`_
+    <https://porespy.org/examples/io/reference/to_vtk.html>`__
     to view online example.
 
     """
     try:
         from pyevtk.hl import imageToVTK
     except ModuleNotFoundError:
-        msg = 'The pyevtk package can be installed with pip install pyevtk'
+        msg = "The pyevtk package can be installed with pip install pyevtk"
         raise ModuleNotFoundError(msg)
     if len(im.shape) == 2:
         im = im[:, :, np.newaxis]
@@ -103,25 +102,31 @@ def to_vtk(im, filename, divide=False, downsample=False, voxel_size=1, vox=False
         im = im.astype(np.int8)
     vs = voxel_size
     if divide:
-        split = np.round(im.shape[2] / 2).astype(np.int)
+        split = np.round(im.shape[2] / 2).astype(int)
         im1 = im[:, :, 0:split]
         im2 = im[:, :, split:]
-        imageToVTK(f"{filename}_1",
-                   cellData={"im": np.ascontiguousarray(im1)},
-                   spacing=(vs, vs, vs),)
-        imageToVTK(f"{filename}_2",
-                   origin=(0.0, 0.0, split * vs),
-                   cellData={"im": np.ascontiguousarray(im2)},
-                   spacing=(vs, vs, vs),)
+        imageToVTK(
+            f"{filename}_1",
+            cellData={"im": np.ascontiguousarray(im1)},
+            spacing=(vs, vs, vs),
+        )
+        imageToVTK(
+            f"{filename}_2",
+            origin=(0.0, 0.0, split * vs),
+            cellData={"im": np.ascontiguousarray(im2)},
+            spacing=(vs, vs, vs),
+        )
     elif downsample:
         im = nd.interpolation.zoom(im, zoom=0.5, order=0, mode="reflect")
-        imageToVTK(filename,
-                   cellData={"im": np.ascontiguousarray(im)},
-                   spacing=(2 * vs, 2 * vs, 2 * vs),)
+        imageToVTK(
+            filename,
+            cellData={"im": np.ascontiguousarray(im)},
+            spacing=(2 * vs, 2 * vs, 2 * vs),
+        )
     else:
-        imageToVTK(filename,
-                   cellData={"im": np.ascontiguousarray(im)},
-                   spacing=(vs, vs, vs))
+        imageToVTK(
+            filename, cellData={"im": np.ascontiguousarray(im)}, spacing=(vs, vs, vs)
+        )
 
 
 def to_palabos(im, filename, solid=0):
@@ -150,7 +155,7 @@ def to_palabos(im, filename, solid=0):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/io/reference/to_palabos.html>`_
+    <https://porespy.org/examples/io/reference/to_palabos.html>`__
     to view online example.
 
     """
@@ -168,54 +173,6 @@ def to_palabos(im, filename, solid=0):
     with open(filename, "w") as f:
         out_data = dt.flatten().tolist()
         f.write("\n".join(map(repr, out_data)))
-
-
-def openpnm_to_im(
-    network,
-    pore_shape="sphere",
-    throat_shape="cylinder",
-    max_dim=None,
-    rtol=0.1,
-):
-    r"""
-    Generates voxel image from an OpenPNM network object.
-
-    Parameters
-    ----------
-    network : OpenPNM GenericNetwork
-        Network from which voxel image is to be generated
-    pore_shape : str
-        Shape of pores in the network, valid choices are "sphere", "cube"
-    throat_shape : str
-        Shape of throats in the network, valid choices are "cylinder", "cuboid"
-    max_dim : int
-        Number of voxels in the largest dimension of the network
-    rtol : float
-        Stopping criteria for finding the smallest voxel image such that
-        further increasing the number of voxels in each dimension by 25% would
-        improve the predicted porosity of the image by less that ``rtol``
-
-    Returns
-    -------
-    im : ndarray
-        Voxelated image corresponding to the given pore network model
-
-    Notes
-    -----
-    (1) The generated voxelated image is labeled with 0s, 1s and 2s signifying
-    solid phase, pores, and throats respectively.
-
-    (2) If max_dim is not provided, the method calculates it such that the
-    further increasing it doesn't change porosity by much.
-
-    """
-    return generate_voxel_image(
-        network,
-        pore_shape=pore_shape,
-        throat_shape=throat_shape,
-        max_dim=max_dim,
-        rtol=rtol,
-    )
 
 
 def to_stl(im, filename, divide=False, downsample=False, voxel_size=1, vox=False):
@@ -249,7 +206,7 @@ def to_stl(im, filename, divide=False, downsample=False, voxel_size=1, vox=False
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/io/reference/to_stl.html>`_
+    <https://porespy.org/examples/io/reference/to_stl.html>`__
     to view online example.
 
     """
@@ -262,7 +219,7 @@ def to_stl(im, filename, divide=False, downsample=False, voxel_size=1, vox=False
         im = im.astype(np.int8)
     vs = voxel_size
     if divide:
-        split = np.round(im.shape[2] / 2).astype(np.int)
+        split = np.round(im.shape[2] / 2).astype(int)
         im1 = im[:, :, 0:split]
         im2 = im[:, :, split:]
         _save_stl(im1, vs, f"{filename}_1")
@@ -291,7 +248,7 @@ def _save_stl(im, vs, filename):
     try:
         from stl import mesh
     except ModuleNotFoundError:
-        msg = 'numpy-stl can be installed with pip install numpy-stl'
+        msg = "numpy-stl can be installed with pip install numpy-stl"
         raise ModuleNotFoundError(msg)
     im = np.pad(im, pad_width=10, mode="constant", constant_values=True)
     vertices, faces, norms, values = ms.marching_cubes(im)
@@ -326,7 +283,7 @@ def to_paraview(im, filename, phase=2):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/io/reference/to_paraview.html>`_
+    <https://porespy.org/examples/io/reference/to_paraview.html>`__
     to view online example.
 
     """
@@ -338,13 +295,15 @@ def to_paraview(im, filename, phase=2):
     try:
         import paraview.simple
     except ModuleNotFoundError:
-        msg = ("The paraview python bindings must be installed using conda"
-               " install -c conda-forge paraview, however this may require"
-               " using a virtualenv since conflicts with other packages are"
-               " common. This is why it is not explicitly included as a"
-               " dependency in porespy.")
+        msg = (
+            "The paraview python bindings must be installed using conda"
+            " install -c conda-forge paraview, however this may require"
+            " using a virtualenv since conflicts with other packages are"
+            " common. This is why it is not explicitly included as a"
+            " dependency in porespy."
+        )
         raise ModuleNotFoundError(msg)
-    data = im.astype("uint8")
+    data = im.astype(np.uint8)
     file = os.path.splitext(filename)[0]
     path = file + ".tiff"
     if len(im.shape) == 2:
@@ -415,7 +374,7 @@ def to_paraview(im, filename, phase=2):
     renderView1.CameraPosition = [
         xshape / 2 - 0.5,
         yshape / 2 - 0.5,
-        4.6 * np.sqrt(np.sum(shape / 2 - 0.5)**2)
+        4.6 * np.sqrt(np.sum(shape / 2 - 0.5) ** 2),
     ]
     renderView1.CameraFocalPoint = [xi / 2 - 0.5 for xi in shape]
 
@@ -434,10 +393,10 @@ def to_paraview(im, filename, phase=2):
     renderView1.CameraPosition = [
         xshape / 2 - 0.5,
         yshape / 2 - 0.5,
-        4.6 * np.sqrt(np.sum(shape / 2 - 0.5)**2)
+        4.6 * np.sqrt(np.sum(shape / 2 - 0.5) ** 2),
     ]
     renderView1.CameraFocalPoint = [xi / 2 - 0.5 for xi in shape]
-    renderView1.CameraParallelScale = np.sqrt(np.sum(shape / 2 - 0.5)**2)
+    renderView1.CameraParallelScale = np.sqrt(np.sum(shape / 2 - 0.5) ** 2)
 
     # Uncomment the following to render all views
     # RenderAllViews()
@@ -453,9 +412,7 @@ def to_paraview(im, filename, phase=2):
     threshold1.ThresholdRange = threshold_range
 
     # Show data in view
-    _ = paraview.simple.Show(
-        threshold1, renderView1, "UnstructuredGridRepresentation"
-    )
+    _ = paraview.simple.Show(threshold1, renderView1, "UnstructuredGridRepresentation")
 
     # Hide data in view
     paraview.simple.Hide(dtiff, renderView1)
@@ -479,12 +436,13 @@ def open_paraview(filename=None, im=None, **kwargs):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/io/reference/open_paraview.html>`_
+    <https://porespy.org/examples/io/reference/open_paraview.html>`__
     to view online example.
 
     """
     if filename is None:
         from datetime import datetime
+
         now = datetime.now()
         filename = now.strftime("%d-%m-%Y_%H-%M-%S")
         to_paraview(im=im, filename=filename, **kwargs)
@@ -493,54 +451,3 @@ def open_paraview(filename=None, im=None, **kwargs):
     # paraview_path = "paraview.exe"
     paraview_path = "paraview"
     subprocess.Popen([paraview_path, statefile])
-
-
-def spheres_to_comsol(filename, im=None, centers=None, radii=None):
-    r"""
-    Exports a sphere pack into a Comsol geometry file.
-
-    An image containing spheres can be specified.  Alternatively as list of
-    ``centers`` and ``radii`` can be given if known.
-
-    Parameters
-    ----------
-    filename : string or path object
-        Location and namge to output file
-    im : ndarray (optional)
-        A voxel image containing spheres indicated by non-zeros values.
-        Spheres can be generated using a variety of methods and can overlap.
-        The sphere centers and radii are found as the peaks in the
-        distance transform.  If ``im`` is not supplied, then ``centers`` and
-        ``radii`` must be given.
-    centers : array_like (optional)
-        An array (Ns, 3) of the spheres centers where Ns is the number of
-        spheres.  This must be specified if ``im`` is not suppplied.
-    radii : array_like (optional)
-        An Ns length array of the spheres's. This must be specified if ``im``
-        is not suppplied.
-
-    Notes
-    -----
-    If ``im`` is given then some image analysis is performed to find sphere
-    centers so it may not perfectly represent the spheres in the original
-    image. This is especially true for overlapping sphere and spheres extending
-    beyond the edge of the image.
-
-    Examples
-    --------
-    `Click here
-    <https://porespy.org/examples/io/reference/spheres_to_comsol.html>`_
-    to view online example.
-
-    """
-    from ._comsol import _save_to_comsol
-    if im is not None:
-        if im.ndim != 3:
-            raise Exception('Image must be 3D.')
-        dt = edt(im > 0)
-        dt2 = nd.gaussian_filter(dt, sigma=0.1)
-        peaks = (im > 0)*(nd.maximum_filter(dt2, footprint=ball(3)) == dt)
-        peaks = reduce_peaks(peaks)
-        centers = np.vstack(np.where(peaks)).T
-        radii = dt[tuple(centers.T)].astype(int)
-    _save_to_comsol(filename, centers, radii)

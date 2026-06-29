@@ -1,24 +1,96 @@
+import importlib
+import inspect
 import logging
 import sys
-import numpy as np
-import importlib
-from dataclasses import dataclass
-import psutil
-import inspect
 import time
+import warnings
+from dataclasses import dataclass
+from functools import partial
+from pathlib import Path
+
+import numpy as np
+import psutil
+
+__all__ = [
+    "sanitize_filename",
+    "get_tqdm",
+    "show_docstring",
+    "Results",
+    "tic",
+    "toc",
+    "get_edt",
+    "get_edt_cpu",
+    "get_jit_edt_cpu",
+    "get_skel",
+    "parse_shape",
+    "get_fixtures_path",
+    "Settings",
+]
 
 
 logger = logging.getLogger("porespy")
 
 
-__all__ = [
-    'sanitize_filename',
-    'get_tqdm',
-    'show_docstring',
-    'Results',
-    'tic',
-    'toc',
-]
+def parse_shape(im_or_shape):
+    r"""
+    Given a list of dimensions or an image finds shape in a clean format
+
+    Parameters
+    ----------
+    im_or_shape : scalar, list or ndarray
+        Given a list of dimensions removes any `0`, `inf` or `None`
+        values. Given an image removes any singleton dimensions and returns
+        shape. If a scalar then assumes a 3D shape is requested.
+
+    Returns
+    -------
+    shape : list
+        List of [X, Y] or [X, Y, Z] dimensions
+    """
+    s = np.array(im_or_shape)
+    if len(s) == 1:
+        s = np.array([s] * 3).flatten()
+    elif s.ndim > 1:  # if arg is an image
+        s = s.squeeze()
+        s = np.shape(s)
+    shape = np.array([i for i in s if i not in [0, np.inf, None]], dtype=int)
+    return shape
+
+
+def get_skel():
+    package = importlib.import_module("skimage.morphology")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            func = package.skeletonize_3d
+        except (FutureWarning, AttributeError):
+            func = package.skeletonize
+    return func
+
+
+def get_edt():
+    try:
+        package = importlib.import_module("pyedt")
+        return package.edt
+    except ModuleNotFoundError:
+        package = importlib.import_module("edt")
+        edt = package.edt
+        edt = partial(edt, parallel=Settings().ncores)
+        return edt
+
+def get_jit_edt_cpu():
+    try:
+        package = importlib.import_module("pyedt")
+        return package.jit_edt_cpu
+    except ModuleNotFoundError:
+        return None
+
+def get_edt_cpu():
+    try:
+        package = importlib.import_module("pyedt")
+        return package.edt_cpu
+    except ModuleNotFoundError:
+        return None
 
 
 def _format_time(timespan, precision=3):
@@ -27,14 +99,14 @@ def _format_time(timespan, precision=3):
     if timespan >= 60.0:
         # we have more than a minute, format that in a human readable form
         # Idea from http://snipplr.com/view/5713/
-        parts = [("d", 60*60*24), ("h", 60*60), ("min", 60), ("s", 1)]
+        parts = [("d", 60 * 60 * 24), ("h", 60 * 60), ("min", 60), ("s", 1)]
         time = []
         leftover = timespan
         for suffix, length in parts:
             value = int(leftover / length)
             if value > 0:
                 leftover = leftover % length
-                time.append(u'%s%s' % (str(value), suffix))
+                time.append("%s%s" % (str(value), suffix))
             if leftover < 1:
                 break
         return " ".join(time)
@@ -44,11 +116,11 @@ def _format_time(timespan, precision=3):
     # See bug: https://bugs.launchpad.net/ipython/+bug/348466
     # Try to prevent crashes by being more secure than it needs to
     # E.g. eclipse is able to print a µ, but has no sys.stdout.encoding set.
-    units = [u"s", u"ms", u'us', "ns"]  # the save value
-    if hasattr(sys.stdout, 'encoding') and sys.stdout.encoding:
+    units = ["s", "ms", "us", "ns"]  # the save value
+    if hasattr(sys.stdout, "encoding") and sys.stdout.encoding:
         try:
-            u'\xb5'.encode(sys.stdout.encoding)
-            units = [u"s", u"ms", u'\xb5s', "ns"]
+            "\xb5".encode(sys.stdout.encoding)
+            units = ["s", "ms", "\xb5s", "ns"]
         except UnicodeEncodeError:
             pass
     scaling = [1, 1e3, 1e6, 1e9]
@@ -57,7 +129,7 @@ def _format_time(timespan, precision=3):
         order = min(-int(np.floor(np.log10(timespan)) // 3), 3)
     else:
         order = 3
-    return u"%.*g %s" % (precision, timespan * scaling[order], units[order])
+    return "%.*g %s" % (precision, timespan * scaling[order], units[order])
 
 
 def tic():
@@ -101,13 +173,13 @@ def toc(quiet=False):
 def _is_ipython_notebook():  # pragma: no cover
     try:
         shell = get_ipython().__class__.__name__
-        if shell == 'ZMQInteractiveShell':
-            return True     # Jupyter notebook or qtconsole
-        if shell == 'TerminalInteractiveShell':
-            return False    # Terminal running IPython
-        return False        # Other type (?)
+        if shell == "ZMQInteractiveShell":
+            return True  # Jupyter notebook or qtconsole
+        if shell == "TerminalInteractiveShell":
+            return False  # Terminal running IPython
+        return False  # Other type (?)
     except NameError:
-        return False        # Probably standard Python interpreter
+        return False  # Probably standard Python interpreter
 
 
 @dataclass
@@ -136,18 +208,24 @@ class Settings:  # pragma: no cover
         controls width.
     loglevel : str, or int
         Determines what messages to get printed in console. Options are:
-        "TRACE" (5), "DEBUG" (10), "INFO" (20), "SUCCESS" (25), "WARNING" (30),
-        "ERROR" (40), "CRITICAL" (50)
+        ``'TRACE'`` (5), ``'DEBUG'`` (10), ``'INFO'`` (20), ``'SUCCESS'`` (25),
+        ``'WARNING'`` (30), ``'ERROR'`` (40), ``'CRITICAL'`` (50)
 
     """
+
     __instance__ = None
     # Might need to add 'file': sys.stdout to tqdm dict
-    tqdm = {'disable': True,
-            'colour': None,
-            'ncols': None,
-            'leave': False,
-            'file': sys.stdout}
-    _loglevel = 40 if _is_ipython_notebook() else 30
+    tqdm = {
+        "disable": True,
+        "colour": None,
+        "ncols": None,
+        "leave": False,
+        "file": sys.stdout,
+    }
+    _loglevel = 40
+    # add parallel settings
+    divs = 2  # choose 2 as default
+    overlap = None
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -162,13 +240,13 @@ class Settings:  # pragma: no cover
     def loglevel(self, value):
         if isinstance(value, str):
             options = {
-                "TRACE" : 5,
-                "DEBUG" : 10,
-                "INFO" : 20,
-                "SUCESS" : 25,
-                "WARNING" : 30,
-                "ERROR" : 40,
-                "CRITICAL" : 50
+                "TRACE": 5,
+                "DEBUG": 10,
+                "INFO": 20,
+                "SUCESS": 25,
+                "WARNING": 30,
+                "ERROR": 40,
+                "CRITICAL": 50,
             }
             value = options[value]
         self._loglevel = value
@@ -182,16 +260,16 @@ class Settings:  # pragma: no cover
     def __repr__(self):
         indent = 0
         for item in self.__dir__():
-            if not item.startswith('_'):
+            if not item.startswith("_"):
                 indent = max(indent, len(item) + 1)
-        s = ''
+        s = ""
         for item in self.__dir__():
-            if not item.startswith('_'):
-                s += ''.join((item, ':', ' '*(indent-len(item))))
+            if not item.startswith("_"):
+                s += "".join((item, ":", " " * (indent - len(item))))
                 attr = getattr(self, item)
-                temp = ''.join((attr.__repr__(), '\n'))
+                temp = "".join((attr.__repr__(), "\n"))
                 if isinstance(attr, dict):
-                    temp = temp.replace(',', '\n' + ' '*(indent + 1))
+                    temp = temp.replace(",", "\n" + " " * (indent + 1))
                 s += temp
         return s
 
@@ -205,7 +283,7 @@ class Settings:  # pragma: no cover
         if val is None:
             val = cpu_count
         elif val > cpu_count:
-            logger.error('Value is more than the available number of cores')
+            logger.error("Value is more than the available number of cores")
             val = cpu_count
         self._ncores = val
 
@@ -217,7 +295,7 @@ class Settings:  # pragma: no cover
         return self._notebook
 
     def _set_notebook(self, val):
-        logger.error('This value is determined automatically at runtime')
+        logger.error("This value is determined automatically at runtime")
 
     notebook = property(fget=_get_notebook, fset=_set_notebook)
 
@@ -236,13 +314,13 @@ def get_tqdm():  # pragma: no cover
 
     """
     if Settings().notebook is True:
-        tqdm = importlib.import_module('tqdm.notebook')
+        tqdm = importlib.import_module("tqdm.notebook")
     else:
-        tqdm = importlib.import_module('tqdm')
+        tqdm = importlib.import_module("tqdm")
     return tqdm.tqdm
 
 
-def show_docstring(func):  # pragma: no cover
+def show_docstring(func, fold=True, method='pandoc'):  # pragma: no cover
     r"""
     Fetches the docstring for a function and returns it in markdown format.
 
@@ -251,7 +329,7 @@ def show_docstring(func):  # pragma: no cover
     Parameters
     ----------
     func : object
-        Function handle to function whose docstring is desired
+        Handle to function whose docstring is desired
 
     Returns
     -------
@@ -261,13 +339,23 @@ def show_docstring(func):  # pragma: no cover
         function.
 
     """
-    title = f'---\n ## Documentation for ``{func.__name__}``\n ---\n'
-    try:
-        from npdoc_to_md import render_md_from_obj_docstring
-        txt = render_md_from_obj_docstring(obj=func, obj_namespace=func.__name__)
-    except ModuleNotFoundError:
+    # Note: The following could work too:
+    # import pandoc
+    # Markdown(pandoc.write(pandoc.read(func, format='rst'), format='markdown'))
+    # Although the markdown conversion is not numpydoc specific so is less pretty
+    if method == 'npdoc_to_md':
+        from npdoc_to_md import render_obj_docstring
+        name = func.__module__.rsplit(".", 1)[0] + "." + func.__name__
+        txt = render_obj_docstring(name)
+    elif method == 'pandoc':
+        import pandoc
+        txt = pandoc.write(pandoc.read(func.__doc__, format='rst'), format='html')
+    elif method in ['none', None]:
         txt = func.__doc__
-    return title + txt + '\n---'
+    # The following creates an accordian around text
+    if fold:
+        txt = fr"<details><summary><b>Click to see docs</b></summary>{txt}</details>"
+    return txt
 
 
 def sanitize_filename(filename, ext, exclude_ext=False):
@@ -310,13 +398,16 @@ class Results:
 
     """
 
+    # Resist the urge to add method to this class...the point is to keep
+    # the namespace clean!!
+
     def __init__(self, **kwargs):
         self._func = inspect.getouterframes(inspect.currentframe())[1].function
         self._time = time.asctime()
 
     def __iter__(self):
         for k, v in self.__dict__.items():
-            if not k.startswith('_'):
+            if not k.startswith("_"):
                 yield v
 
     def __getitem__(self, key):
@@ -333,15 +424,32 @@ class Results:
             header,
         ]
         for item in list(self.__dict__.keys()):
-            if item.startswith('_'):
+            if item.startswith("_"):
                 continue
-            if (isinstance(self[item], np.ndarray)):
+            if isinstance(self[item], np.ndarray):
                 s = np.shape(self[item])
                 lines.append("{0:<25s} Array of size {1}".format(item, s))
-            elif hasattr(self[item], 'keys'):
+            elif hasattr(self[item], "keys"):
                 N = len(self[item].keys())
                 lines.append("{0:<25s} Dictionary with {1} items".format(item, N))
             else:
                 lines.append("{0:<25s} {1}".format(item, self[item]))
         lines.append(header)
         return "\n".join(lines)
+
+
+def get_fixtures_path():
+    r"""
+    Get the path to the test fixtures directory.
+
+    Returns
+    -------
+    Path
+        Path object pointing to the test/fixtures directory relative to the
+        package root.
+    """
+    # Get the package root directory (where porespy package is)
+    # This file is at src/porespy/tools/_utils.py, so we go up 3 levels
+    pkg_root = Path(__file__).parent.parent.parent.parent
+    fixtures_path = pkg_root / "test" / "fixtures"
+    return fixtures_path

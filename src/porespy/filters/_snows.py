@@ -1,28 +1,31 @@
+import inspect
+import logging
+import math
 import os
 from pathlib import Path
+
 import dask
 import dask.array as da
 import dask.distributed
-import inspect as insp
-import logging
-import math
 import numpy as np
-from numba import njit, prange
 import scipy.ndimage as spim
 import scipy.spatial as sptl
+from numba import njit, prange
+from skimage.morphology import footprint_rectangle
 from skimage.segmentation import watershed
-from skimage.morphology import square, cube
-from porespy.tools import _check_for_singleton_axes
-from porespy.tools import extend_slice, ps_rect, ps_round
-from porespy.tools import Results
-from porespy.tools import get_tqdm
-from porespy.filters import chunked_func
-from porespy import settings
-try:
-    from pyedt import edt
-except ModuleNotFoundError:
-    from edt import edt
 
+from porespy.tools import (
+    Results,
+    _check_for_singleton_axes,
+    extend_slice,
+    get_edt,
+    get_tqdm,
+    ps_rect,
+    ps_round,
+    settings,
+)
+
+from ._funcs import chunked_func
 
 __all__ = [
     "snow_partitioning",
@@ -36,6 +39,7 @@ __all__ = [
 ]
 
 
+edt = get_edt()
 tqdm = get_tqdm()
 logger = logging.getLogger(__name__)
 
@@ -104,7 +108,7 @@ def snow_partitioning(im, dt=None, r_max=4, sigma=0.4, peaks=None):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/filters/reference/snow_partitioning.html>`_
+    <https://porespy.org/examples/filters/reference/snow_partitioning.html>`__
     to view online example.
 
     """
@@ -215,7 +219,7 @@ def snow_partitioning_n(im, r_max=4, sigma=0.4, peaks=None):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/filters/reference/snow_partitioning_n.html>`_
+    <https://porespy.org/examples/filters/reference/snow_partitioning_n.html>`__
     to view online example.
 
     """
@@ -252,7 +256,7 @@ def snow_partitioning_n(im, r_max=4, sigma=0.4, peaks=None):
     return tup
 
 
-def find_peaks(dt, r_max=4, strel=None, sigma=None, divs=1):
+def find_peaks(dt, r_max=4, strel=None, sigma=None, parallel_kw={"divs": 1}):
     r"""
     Finds local maxima in the distance transform
 
@@ -271,12 +275,28 @@ def find_peaks(dt, r_max=4, strel=None, sigma=None, divs=1):
         If given, then a gaussian filter is applied to the distance transform
         using this value for the kernel
         (i.e. ``scipy.ndimage.gaussian_filter(dt, sigma)``)
-    divs : int or array_like
-        The number of times to divide the image for parallel processing.
-        If ``1`` then parallel processing does not occur.  ``2`` is
-        equivalent to ``[2, 2, 2]`` for a 3D image. The number of cores
-        used is specified in ``porespy.settings.ncores`` and defaults to
-        all cores.
+    parallel_kw : dict
+        Dictionary containing the settings for parallelization by chunking. The
+        optional settings include `divs` (scalar or list of scalars,
+        default = [2, 2, 2]), `overlap` (scalar or list of scalars, optional),
+        and `cores` (scalar, default is all available cores).
+
+        `divs` is the number of times to divide the image for parallel
+        processing. If `1` then parallel processing does not occur. `2` is
+        equivalent to `[2, 2, 2]` for a 3D image. If a list is provided, each
+        respective axis will be divided by its corresponding number in the
+        list. For example, [2, 3, 4] will divide z, y, and x axis to 2, 3,
+        and 4 respectively.
+
+        `overlap` is the amount of overlap to include when dividing up the
+        image. This value is controlled by the size (i.e. radius) of the
+        structuring element and cannot be controlled in this function using
+        parallel_kw!
+
+        `cores` is the number of cores that will be used to parallel process all
+        domains. If ``None`` then all cores will be used but user can specify
+        any integer values to control the memory usage. Setting value to 1 will
+        effectively process the chunks in serial to minimize memory usage.
 
     Returns
     -------
@@ -299,10 +319,13 @@ def find_peaks(dt, r_max=4, strel=None, sigma=None, divs=1):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/filters/reference/find_peaks.html>`_
+    <https://porespy.org/examples/filters/reference/find_peaks.html>`__
     to view online example.
 
     """
+    # parse out divs from parallel_kw, take from settings if not given!
+    divs = parallel_kw.get("divs", settings.divs)
+    cores = parallel_kw.get("cores", settings.ncores)
     im = dt > 0
     _check_for_singleton_axes(im)
     if strel is None:
@@ -314,13 +337,13 @@ def find_peaks(dt, r_max=4, strel=None, sigma=None, divs=1):
         divs = [divs]*len(im.shape)
     if np.any(np.array(divs) > 1):
         parallel = True
-        logger.info(f'Performing {insp.currentframe().f_code.co_name} in parallel')
+        logger.info(f'Performing {inspect.currentframe().f_code.co_name} in parallel')
     if parallel:
         overlap = max(strel.shape)
-        mx = chunked_func(func=spim.maximum_filter, overlap=overlap,
+        parallel_kw = {"divs": divs, "overlap": overlap, "cores": cores}
+        mx = chunked_func(func=spim.maximum_filter, parallel_kw=parallel_kw,
                           im_arg='input', input=dt + 2.0 * (~im),
-                          footprint=strel,
-                          cores=settings.ncores, divs=divs)
+                          footprint=strel)
     else:
         # The "2 * (~im)" sets solid voxels to 2 so peaks are not found
         # at the void/solid interface
@@ -355,16 +378,13 @@ def reduce_peaks(peaks):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/filters/reference/reduce_peaks.html>`_
+    <https://porespy.org/examples/filters/reference/reduce_peaks.html>`__
     to view online example.
 
     """
-    if peaks.ndim == 2:
-        strel = square
-    else:
-        strel = cube
-    markers, N = spim.label(input=peaks, structure=strel(3))
-    inds = spim.measurements.center_of_mass(
+    strel = footprint_rectangle((3,) * peaks.ndim)
+    markers, N = spim.label(input=peaks, structure=strel)
+    inds = spim.center_of_mass(
         input=peaks, labels=markers, index=np.arange(1, N + 1)
     )
     inds = np.floor(inds).astype(int)
@@ -405,18 +425,16 @@ def trim_saddle_points(peaks, dt, maxiter=20):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/filters/reference/trim_saddle_points.html>`_
+    <https://porespy.org/examples/filters/reference/trim_saddle_points.html>`__
     to view online example.
 
     """
     new_peaks = np.zeros_like(peaks, dtype=bool)
-    if dt.ndim == 2:
-        from skimage.morphology import square as cube
-    else:
-        from skimage.morphology import cube
+    strel = footprint_rectangle((3,) * dt.ndim)
     labels, N = spim.label(peaks > 0)
     slices = spim.find_objects(labels)
-    for i, s in tqdm(enumerate(slices), **settings.tqdm):
+    desc = inspect.currentframe().f_code.co_name  # Get current func name
+    for i, s in tqdm(enumerate(slices), desc=desc, **settings.tqdm):
         sx = extend_slice(s, shape=peaks.shape, pad=maxiter)
         peaks_i = labels[sx] == i + 1
         dt_i = dt[sx]
@@ -424,7 +442,7 @@ def trim_saddle_points(peaks, dt, maxiter=20):
         iters = 0
         while iters < maxiter:
             iters += 1
-            peaks_dil = spim.binary_dilation(input=peaks_i, structure=cube(3))
+            peaks_dil = spim.binary_dilation(input=peaks_i, structure=strel)
             peaks_max = peaks_dil * np.amax(dt_i * peaks_dil)
             peaks_extended = (peaks_max == dt_i) * im_i
             if np.all(peaks_extended == peaks_i):
@@ -480,17 +498,15 @@ def trim_saddle_points_legacy(peaks, dt, maxiter=10):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/filters/reference/trim_saddle_points_legacy.html>`_
+    <https://porespy.org/examples/filters/reference/trim_saddle_points_legacy.html>`__
     to view online example.
     """
     new_peaks = np.zeros_like(peaks, dtype=bool)
-    if dt.ndim == 2:
-        from skimage.morphology import square as cube
-    else:
-        from skimage.morphology import cube
+    strel = footprint_rectangle((3,) * dt.ndim)
     labels, N = spim.label(peaks > 0)
     slices = spim.find_objects(labels)
-    for i, s in tqdm(enumerate(slices), **settings.tqdm):
+    desc = inspect.currentframe().f_code.co_name  # Get current func name
+    for i, s in tqdm(enumerate(slices), desc=desc, **settings.tqdm):
         sx = extend_slice(s, shape=peaks.shape, pad=10)
         peaks_i = labels[sx] == i + 1
         dt_i = dt[sx]
@@ -498,7 +514,7 @@ def trim_saddle_points_legacy(peaks, dt, maxiter=10):
         iters = 0
         while iters < maxiter:
             iters += 1
-            peaks_dil = spim.binary_dilation(input=peaks_i, structure=cube(3))
+            peaks_dil = spim.binary_dilation(input=peaks_i, structure=strel)
             peaks_max = peaks_dil * np.amax(dt_i * peaks_dil)
             peaks_extended = (peaks_max == dt_i) * im_i
             if np.all(peaks_extended == peaks_i):
@@ -556,24 +572,19 @@ def trim_nearby_peaks(peaks, dt, f=1):
     References
     ----------
     [1] Gostick, J. "A versatile and efficient network extraction
-    algorithm using marker-based watershed segmenation". Physical Review
+    algorithm using marker-based watershed segmentation". Physical Review
     E. (2017)
 
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/filters/reference/trim_nearby_peaks.html>`_
+    <https://porespy.org/examples/filters/reference/trim_nearby_peaks.html>`__
     to view online example.
 
     """
-    if dt.ndim == 2:
-        from skimage.morphology import square as cube
-    else:
-        from skimage.morphology import cube
-
-    labels, N = spim.label(peaks > 0, structure=cube(3))
-    crds = spim.measurements.center_of_mass(peaks > 0, labels=labels,
-                                            index=np.arange(1, N + 1))
+    strel = footprint_rectangle((3,) * dt.ndim)
+    labels, N = spim.label(peaks > 0, structure=strel)
+    crds = spim.center_of_mass(peaks > 0, labels=labels, index=np.arange(1, N + 1))
     try:
         crds = np.vstack(crds).astype(int)  # Convert to numpy array of ints
     except ValueError:
@@ -625,6 +636,7 @@ def _estimate_overlap(im, mode='dt', zoom=0.25, dt=None):
 def snow_partitioning_parallel(im,
                                r_max=4,
                                sigma=0.4,
+                               parallel_kw={},
                                divs=2,
                                overlap=None,
                                cores=None,
@@ -632,44 +644,57 @@ def snow_partitioning_parallel(im,
                                ):
     r"""
     Performs SNOW algorithm in parallel (or serial) to reduce time
-    (or memory usage) by geomertirc domain decomposition of large images.
+    (or memory usage) by geometric domain decomposition of large images.
 
     Parameters
     ----------
     im : ndarray
         A binary image of porous media with 'True' values indicating
         phase of interest.
-    overlap : float (optional)
-        The amount of overlap to apply between chunks.  If not provided it
-        will be estiamted using ``porespy.tools.estimate_overlap`` with
-        ``mode='dt'``.
-    divs : list or int
-        Number of domains each axis will be divided. Options are:
-          - scalar: it will be assigned to all axis.
-          - list: each respective axis will be divided by its
-            corresponding number in the list. For example [2, 3, 4] will
-            divide z, y and x axis to 2, 3, and 4 respectively.
-    cores : int or None
-        Number of cores that will be used to parallel process all domains.
-        If ``None`` then all cores will be used but user can specify any
-        integer values to control the memory usage.  Setting value to 1
-        will effectively process the chunks in serial to minimize memory
-        usage.
+    parallel_kw : dict
+        Dictionary containing the settings for parallelization by chunking. The
+        optional settings include `divs` (scalar or list of scalars,
+        default = [2, 2, 2]), `overlap` (scalar or list of scalars, optional),
+        and `cores` (scalar, default is all available cores).
+
+        `divs` is the number of times to divide the image for parallel
+        processing. If `1` then parallel processing does not occur. `2` is
+        equivalent to `[2, 2, 2]` for a 3D image. If a list is provided, each
+        respective axis will be divided by its corresponding number in the
+        list. For example, [2, 3, 4] will divide z, y, and x axis to 2, 3,
+        and 4 respectively.
+
+        `overlap` is the amount of overlap to include when dividing up the image.
+        This value will almost always be the size (i.e. radius) of the
+        structuring element. If not specified then the amount of overlap
+        is inferred from the size of the structuring element, in which
+        case the `strel_arg` must be specified.
+
+        `cores` is the number of cores that will be used to parallel process all
+        domains. If ``None`` then all cores will be used but user can specify
+        any integer values to control the memory usage. Setting value to 1 will
+        effectively process the chunks in serial to minimize memory usage.
 
     Returns
     -------
     regions : ndarray
-        Partitioned image of segmentated regions with unique labels. Each
+        Partitioned image of segmented regions with unique labels. Each
         region correspond to pore body while intersection with other
         region correspond throat area.
 
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/filters/reference/snow_partitioning_parallel.html>`_
+    <https://porespy.org/examples/filters/reference/snow_partitioning_parallel.html>`__
     to view online example.
 
     """
+    # parse out divs, cores, overlap from parallel_kw
+    # take default from settings if not on parallel_kw dict
+    divs = parallel_kw.get("divs", settings.divs)
+    cores = parallel_kw.get("cores", settings.ncores)
+    overlap = parallel_kw.get("overlap", settings.overlap)
+
     try:
         dask.distributed.get_client()  # checks for distributed context
         distributed = True
@@ -756,7 +781,7 @@ def snow_partitioning_parallel(im,
         s_ = []
         for i in range(im.ndim):
             start = chunk_idx[i] * (chunk_shape[i] + 2)
-            start -= np.array(start > 0, np.int)
+            start -= np.array(start > 0, int)
             end = start + chunk_data.shape[i]
             s_.append(slice(start, end))
 
@@ -955,13 +980,13 @@ def _pad(im, pad_width=1, constant_value=0):
     pad_width : int
         The number of values that will be padded from the edges. Default
         values is 1.
-    contant_value : int
+    constant_value : int
         Pads with the specified constant value
 
     Returns
     -------
     output: ndarray
-        Padded image with same dimnesions as provided image
+        Padded image with same dimensions as provided image
 
     """
     shape = np.array(im.shape)
@@ -1051,7 +1076,7 @@ def _trim_internal_slice(im, chunk_shape):
     -------
     output : ndarray
         Image without extra internal slices. The shape of the image will
-        be same as input image provided for waterhsed segmentation.
+        be same as input image provided for watershed segmentation.
 
     """
     im_shape = np.array(im.shape, dtype=np.uint32)

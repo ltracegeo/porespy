@@ -12,9 +12,18 @@ modules, occasionally with basic embedded examples on how to use them.
 
 """
 
-from .tools._utils import Settings as _Settings
+import logging
+from pathlib import Path
 
-settings = _Settings()
+from rich.logging import RichHandler
+
+FORMAT = "%(message)s"
+logging.basicConfig(
+    format=FORMAT, datefmt="[%X]", handlers=[RichHandler(rich_tracebacks=True)]
+)
+
+logger = logging.getLogger("porespy")
+
 
 from . import tools
 from . import filters
@@ -24,28 +33,25 @@ from . import generators
 from . import simulations
 from . import visualization
 from . import io
-
-# TODO: Deprecate dns module once v3 is out
-from . import dns
-
 from .visualization import imshow
 
+try:
+    import tomllib as _toml
+except ModuleNotFoundError:
+    import tomli as _toml
+import importlib.metadata as _metadata
 import numpy as _np
 
 _np.seterr(divide="ignore", invalid="ignore")
+settings = tools.Settings()
 
-__version__ = tools._get_version()
+_pyproject = Path(__file__).parents[2] / "pyproject.toml"
 
-
-def _setup_logger_rich():
-    import logging
-
-    from rich.logging import RichHandler
-
-    FORMAT = "%(message)s"
-    logging.basicConfig(
-        format=FORMAT, datefmt="[%X]", handlers=[RichHandler(rich_tracebacks=True)]
-    )
-
-
-_setup_logger_rich()
+if _pyproject.exists():
+    with open(_pyproject, "rb") as f:
+        data = _toml.load(f)
+        __version__ = data["project"]["version"]
+        logger.debug("Loaded version from pyproject.toml")
+else:
+    __version__ = _metadata.version(__package__ or __name__)
+    logger.debug("Loaded version from importlib.metadata")

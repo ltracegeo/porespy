@@ -1,14 +1,17 @@
+import inspect
 import logging
+
 import numpy as np
 import scipy.ndimage as spim
-from skimage.morphology import disk, ball
 from edt import edt
-from porespy.tools import extend_slice
-from porespy import settings
-from porespy.tools import get_tqdm, make_contiguous
-from porespy.metrics import region_surface_areas, region_interface_areas
-from porespy.metrics import region_volumes
+from skimage.morphology import ball, disk
 
+from porespy.metrics import (
+    region_interface_areas,
+    region_surface_areas,
+    region_volumes,
+)
+from porespy.tools import extend_slice, get_tqdm, make_contiguous, settings
 
 __all__ = [
     "regions_to_network",
@@ -45,18 +48,17 @@ def regions_to_network(
     accuracy : string
         Controls how accurately certain properties are calculated. Options are:
 
-        ------------ --------------------------------------------------------
-        Value        Description
-        ------------ --------------------------------------------------------
-        'standard'   Computes the surface areas and perimeters by simply
-                     counting voxels. This is *much* faster but does not
-                     properly account for the rough voxelated nature of the
-                     surfaces.
-        'high'       Computes surface areas using the marching cube method,
-                     and perimeters using the fast marching method. These
-                     are substantially slower but better account for the
-                     voxelated nature of the images.
-        ------------ --------------------------------------------------------
+        ========== ============================================================
+        Value      Description
+        ========== ============================================================
+        'standard' Computes the surface areas and perimeters by simply counting
+                   voxels. This is *much* faster but does not properly account
+                   for the rough voxelated nature of the surfaces.
+        'high'     Computes surface areas using the marching cube method, and
+                   perimeters using the fast marching method. These are
+                   substantially slower but better account for the voxelated
+                   nature of the images.
+        ========== ============================================================
 
     porosity_map : None
         This is not supported for this version of the function.
@@ -130,7 +132,7 @@ def regions_to_network(
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/networks/reference/regions_to_network.html>`_
+    <https://porespy.org/examples/networks/reference/regions_to_network.html>`__
     to view online example.
 
     """
@@ -173,8 +175,8 @@ def regions_to_network(
     t_coords = []
 
     # Start extracting size information for pores and throats
-    msg = "Extracting pore and throat properties"
-    for i in tqdm(Ps, desc=msg, **settings.tqdm):
+    desc = inspect.currentframe().f_code.co_name  # Get current func name
+    for i in tqdm(Ps, desc=desc, **settings.tqdm):
         pore = i - 1
         if slices[pore] is None:
             continue
@@ -252,14 +254,14 @@ def regions_to_network(
     PT1 = PT1-p_dia_local[P12[:, 0]]/2*voxel_size
     PT2 = PT2-p_dia_local[P12[:, 1]]/2*voxel_size
     dist = (p_coords[P12[:, 0]] - p_coords[P12[:, 1]])*voxel_size
-    net['throat.direct_length'] = np.sqrt(np.sum(dist**2, axis=1, dtype=np.int64))
+    net['throat.direct_length'] = np.sqrt(np.sum(dist**2, axis=1, dtype=np.float64))
     net['throat.perimeter'] = np.array(t_perimeter)*voxel_size
     if (accuracy == 'high') and (im.ndim == 2):
         msg = "accuracy='high' only available in 3D, reverting to 'standard'"
         logger.warning(msg)
         accuracy = 'standard'
     if (accuracy == 'high'):
-        net['pore.volume'] = region_volumes(regions=im, mode='marching_cubes')
+        net['pore.volume'] = region_volumes(regions=im, method='marching_cubes')
         areas = region_surface_areas(regions=im, voxel_size=voxel_size)
         net['pore.surface_area'] = areas
         interface_area = region_interface_areas(regions=im, areas=areas,

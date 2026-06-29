@@ -1,29 +1,19 @@
-import numpy as np
 import logging
-from porespy.tools import Results
-from porespy.networks import (
-    regions_to_network,
-    regions_to_network_parallel,
-    add_boundary_regions,
-    label_phases,
-    label_boundaries,
-)
-from porespy.filters import (
-    snow_partitioning,
-    snow_partitioning_parallel,
-)
-try:
-    from pyedt import edt, jit_edt_cpu
-except ModuleNotFoundError:
-    from edt import edt
+
+import numpy as np
+
+from porespy.filters import snow_partitioning, snow_partitioning_parallel
+from porespy.tools import Results, get_edt, get_jit_edt_cpu
+from porespy.networks import regions_to_network_parallel
+
+from ._funcs import add_boundary_regions, label_boundaries, label_phases
+from ._getnet_orig import regions_to_network
+
+__all__ = ["snow2", "_parse_pad_width"]
 
 
-__all__ = [
-    "snow2",
-    "_parse_pad_width",
-]
-
-
+edt = get_edt()
+jit_edt_cpu = get_jit_edt_cpu()
 logger = logging.getLogger(__name__)
 
 
@@ -58,7 +48,7 @@ def snow2(
     r_max=4,
     peaks=None,
     porosity_map=None,
-    parallelization={},
+    parallel_kw={},
     parallel_extraction=False,
     force_cpu=False,
 ):
@@ -106,18 +96,17 @@ def snow2(
         the analysis of regions in the ``regions_to_network`` function.
         Options are:
 
-        ------------ --------------------------------------------------------
-        Value        Description
-        ------------ --------------------------------------------------------
-        'standard'   Computes the surface areas and perimeters by simply
-                     counting voxels. This is *much* faster but does not
-                     properly account for the rough voxelated nature of the
-                     surfaces.
-        'high'       Computes surface areas using the marching cube method,
-                     and perimeters using the fast marching method. These
-                     are substantially slower but better account for the
-                     voxelated nature of the images.
-        ------------ --------------------------------------------------------
+        ========== ============================================================
+        Value      Description
+        ========== ============================================================
+        'standard' Computes the surface areas and perimeters by simply counting
+                   voxels. This is *much* faster but does not properly account
+                   for the rough voxelated nature of the surfaces.
+        'high'     Computes surface areas using the marching cube method, and
+                   perimeters using the fast marching method. These are
+                   substantially slower but better account for the voxelated
+                   nature of the images.
+        ========== ============================================================
 
     voxel_size : tuple (default = (1, 1, 1))
         The resolution of the image, expressed as the length of the sides of a
@@ -143,15 +132,30 @@ def snow2(
         array should contain peaks for all phases, and they are masked by
         the ``phases`` argument. If ``peaks`` are provided the parallelization
         is disabled.
-    parallelization : dict
-        The arguments for controlling the parallelization of the watershed
-        function are rolled into this dictionary, otherwise the function
-        signature would become too complex. Refer to the docstring of
-        ``snow_partitioning_parallel`` for complete details. If no values
-        are provided then the defaults for that function are used here.
-        To disable parallelization pass ``parallel=None``, which will
-        invoke the standard ``snow_partitioning`` or ``snow_partitioning_n``.
-        If ``peaks`` are provided the parallelization is disabled.
+    parallel_kw : dict
+        Dictionary containing the settings for parallelization by chunking. The
+        optional settings include `divs` (scalar or list of scalars,
+        default = [2, 2, 2]), `overlap` (scalar or list of scalars, optional),
+        and `cores` (scalar, default is all available cores).
+
+        ========== ============================================================
+        Key        Description
+        ========== ============================================================
+        'divs'     The number of divisions to make along each axis of the image.
+                   If a scalar is provided, it is applied to all axes.
+                   If a list is provided, each axis will be divided by its
+                   corresponding number in the list.
+        'overlap'  The amount of overlap to include when dividing up the image.
+                   This value will almost always be the size (i.e. radius) of
+                   the structuring element. If not specified then the amount
+                   of overlap is inferred from the size of the structuring
+                   element, in which case the `strel_arg` must be specified.
+        'cores'    The number of cores that will be used to parallel process all
+                   domains. If ``None`` then all cores will be used but user can
+                   specify any integer values to control the memory usage.
+                   Setting value to 1 will effectively process the chunks in
+                   serial to minimize memory usage.
+        ========== ============================================================
 
     Returns
     -------
@@ -191,7 +195,7 @@ def snow2(
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/networks/reference/snow2.html>`_
+    <https://porespy.org/examples/networks/reference/snow2.html>`__
     to view online example.
 
     """
@@ -205,7 +209,7 @@ def snow2(
         vals = np.unique(phases)
         vals = vals[vals > 0]
     if peaks is not None:
-        parallelization = None
+        parallel_kw = None
     overlaps = {}
     for i in vals:
         phase = phases == i
@@ -214,9 +218,10 @@ def snow2(
         else:
             phase_dt = None
         overlaps[i], chunk = estimate_overlap_and_chunk(phase, dt=phase_dt)
+        # TODO: this may not be the overlap the user provides!
         if (overlaps[i] > (chunk//2 - 1)).any():
-            parallelization = None
-            logger.warning("Disabling paralelization as overlap exceeds chunk size.")
+            parallel_kw = None
+            logger.warning("Disabling paralelization as overlap exceeds than chunk size.")
     if type(sigma) is not dict:
         sigma_dict = {}
         for i in vals:
@@ -231,13 +236,13 @@ def snow2(
             dt = jit_edt_cpu(phase)
         else:
             dt = None
-        if parallelization is not None:
+        if parallel_kw is not None:
             snow = snow_partitioning_parallel(
                 im=phase,
                 sigma=sigma[i],
                 r_max=r_max,
+                parallel_kw=parallel_kw,
                 overlap=overlaps[i],
-                **parallelization,
                 dt=dt,
             )
         else:
@@ -293,7 +298,7 @@ def snow2(
         W = boundary_width.flatten()
         L = ['xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax'][:phases.ndim*2]
         L = [L[i]*int(W[i] > 0) for i in range(len(L))]
-        L = np.reshape(L, newshape=boundary_width.shape)
+        L = np.reshape(L, shape=boundary_width.shape)
         net = label_boundaries(net, labels=L)
     result = Results()
     result.network = net

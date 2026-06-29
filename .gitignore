@@ -5,6 +5,8 @@ __pycache__/
 
 # C extensions
 *.so
+*.dylib
+*.dll
 
 # Distribution / packaging
 .Python
@@ -163,3 +165,4 @@ examples/networks/*.vt*
 examples/**/*.vtp
 examples/**/*.tif
 *.mphtxt
+*.DS_Store

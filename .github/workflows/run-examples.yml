@@ -1,0 +1,56 @@
+name: Examples
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.operating-system }}
+    defaults:
+      run:
+        shell: bash
+
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        python-version: ["3.13"]
+        operating-system: [ubuntu-latest]
+        # Next line should be [1, 2, ..., max-parallel)
+        test_group: [1, 2, 3, 4, 5]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install pandoc
+        uses: pandoc/actions/setup@v1
+
+      - name: Set up uv
+        id: setup-uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+          cache-dependency-glob: "**/pyproject.toml"
+          cache-suffix: "uv-${{ matrix.python-version }}-${{ matrix.operating-system }}"
+
+      - name: Install PoreSpy
+        run: |
+          uv sync --group test --group build --extra extras
+          uv build
+
+      - name: Setup FFmpeg
+        uses: AnimMouse/setup-ffmpeg@v1
+
+      - name: Run examples
+        # Make sure to pass max-parallel to --splits
+        run: |
+          uv run pytest \
+            -p no:python \
+            --nbval-lax \
+            --splits ${{ strategy.max-parallel}} \
+            --group ${{ matrix.test_group }} \
+            --durations-path test/fixtures/.test_durations_examples \
+            --suppress-no-test-exit-code  # so if no tests collected, CI won't break

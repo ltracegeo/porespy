@@ -1,0 +1,142 @@
+name: Deploy to TestPyPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (major/minor/patch/dev/alpha/beta/release)"
+        required: true
+        default: "patch"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      matrix:
+        os: [linux, windows, macos-14-arm]
+        include:
+          - archs: auto
+            platform: auto
+          - os: linux
+            runs-on: ubuntu-latest
+          - os: windows
+            runs-on: windows-latest
+          - os: macos-14-arm
+            runs-on: macos-latest
+            macOS-version: 14.0
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          ref: dev
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ secrets.PAT }}
+
+      - name: Set up uv
+        id: setup-uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          cache-dependency-glob: "**/pyproject.toml"
+          cache-suffix: "uv-${{ matrix.os }}-${{ matrix.archs }}"
+
+      # - name: Install Ninja on Windows
+      #   if: runner.os == 'Windows'
+      #   run: choco install ninja -y
+
+      - name: Install PoreSpy and build C shared libraries
+        run: |
+          uv sync --extra extras --extra build --no-cache --force-reinstall
+          uv build
+
+      - name: Bump up version
+        run: |
+          uv run hatch version ${{ github.event.inputs.version }}
+          echo "VERSION=v$(uv run hatch version)" >> $GITHUB_ENV
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.1.4
+        env:
+          CIBW_PLATFORM: ${{ matrix.platform }}
+          CIBW_ARCHS: ${{ matrix.archs }}
+          CIBW_ARCHS_LINUX: auto64
+          CIBW_SKIP: "*-musllinux_* pp*"
+          CIBW_BUILD: cp310* cp311* cp312*
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macOS-version }}
+          CIBW_BUILD_VERBOSITY: 1
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
+
+  version:
+    name: Bump version and create tag
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          ref: dev
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ secrets.PAT }}
+
+      - name: Set up uv
+        id: setup-uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.13"
+          cache-dependency-glob: "**/pyproject.toml"
+
+      - name: Install build dependencies
+        run: |
+          uv sync --extra build
+
+      # - name: Bump up version
+      #   run: |
+      #     uv run hatch version ${{ github.event.inputs.version }}
+      #     echo "VERSION=v$(uv run hatch version)" >> $GITHUB_ENV
+
+      # - name: Commit version bump, create and push tag
+      #   uses: stefanzweifel/git-auto-commit-action@v6
+      #   with:
+      #     commit_message: Bump version to ${{ env.VERSION }}
+      #     commit_author: GitHub Actions <actions@github.com>
+      #     tagging_message: ${{ env.VERSION }}
+
+  publish:
+    name: Publish to TestPyPI
+    runs-on: ubuntu-latest
+    needs: version
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v5
+        with:
+          # unpacks all CIBW artifacts into dist/
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          user: __token__
+          password: ${{ secrets.TESTPYPI_TOKEN }}
+          verbose: true

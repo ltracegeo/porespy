@@ -1,14 +1,13 @@
 import logging
+import time
 
 import numpy as np
-import openpnm as op
 
 from porespy.filters import trim_nonpercolating_paths
 from porespy.generators import faces
 from porespy.tools import Results
 
 logger = logging.getLogger(__name__)
-ws = op.Workspace()
 
 
 __all__ = ["tortuosity_fd"]
@@ -39,22 +38,22 @@ def tortuosity_fd(im, axis, solver=None):
         effective_porosity  Porosity of the image after applying
                             ``trim_nonpercolating_paths``.  This removes
                             disconnected voxels which cause singular matrices.
-
         original_porosity   Porosity of the as-received the image
-
-        formation_factor    Found as :math:`D_{AB}/D_{eff}`.
-
-        concentration       An image containing the concentration values from
+        formation_factor    found as :math:`D_{AB}/D_{eff}`.
+        im_conc             An image containing the concentration values from
                             the simulation.
         =================== ===================================================
 
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/simulations/reference/tortuosity_fd.html>`_
+    <https://porespy.org/examples/simulations/reference/tortuosity_fd.html>`__
     to view online example.
 
     """
+    import openpnm as op
+    ws = op.Workspace()
+
     if axis > (im.ndim - 1):
         raise Exception(f"'axis' must be <= {im.ndim}")
     openpnm_v3 = op.__version__.startswith("3")
@@ -66,7 +65,7 @@ def tortuosity_fd(im, axis, solver=None):
     inlets = faces(im.shape, inlet=axis)
     outlets = faces(im.shape, outlet=axis)
     im = trim_nonpercolating_paths(im, inlets=inlets, outlets=outlets)
-    # Check if porosity is changed after trimmimg floating pores
+    # Check if porosity is changed after trimming floating pores
     eps = im.sum(dtype=np.int64) / im.size
     if not eps:
         raise Exception("No pores remain after trimming floating pores")
@@ -89,6 +88,7 @@ def tortuosity_fd(im, axis, solver=None):
     cL, cR = 1.0, 0.0
     fd.set_value_BC(pores=inlets, values=cL)
     fd.set_value_BC(pores=outlets, values=cR)
+    t = time.perf_counter_ns()
     if openpnm_v3:
         if solver is None:
             solver = op.solvers.PyamgRugeStubenSolver(tol=1e-8)
@@ -99,6 +99,7 @@ def tortuosity_fd(im, axis, solver=None):
     else:
         fd.settings.update({"solver_family": "scipy", "solver_type": "cg"})
         fd.run()
+    t = time.perf_counter_ns() - t
 
     # Calculate molar flow rate, effective diffusivity and tortuosity
     r_in = fd.rate(pores=inlets)[0]
@@ -121,8 +122,8 @@ def tortuosity_fd(im, axis, solver=None):
     result.effective_porosity = eps
     conc = np.zeros(im.size, dtype=float)
     conc[net["pore.template_indices"]] = fd["pore.concentration"]
-    result.concentration = conc.reshape(im.shape)
-    result.sys = fd.A, fd.b
+    result.im_conc = conc.reshape(im.shape)
+    result.time = t/1e9
 
     # Free memory
     ws.close_project(net.project)

@@ -1,0 +1,66 @@
+name: Nightly
+
+on:
+  schedule:
+    # Run (on default branch only) at 05:00 (hr:mm) UTC -> 12am EST
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+jobs:
+  test-dev:
+    name: Dev / ${{ matrix.os }} / py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+        os: [ubuntu-latest, macos-latest, macos-13, windows-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/pyproject.toml"
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --group test --extra extras
+
+      - name: Build package
+        run: uv build
+
+      - name: Run tests
+        run: uv run pytest -v
+
+  test-pypi:
+    name: PyPI / ${{ matrix.os }} / py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+        os: [ubuntu-latest, macos-latest, macos-13, windows-latest]
+
+    steps:
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/pyproject.toml"
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install PoreSpy from PyPI
+        run: uv pip install porespy[extras] pytest pytest-cov
+
+      - name: Run tests
+        run: uv run pytest -v

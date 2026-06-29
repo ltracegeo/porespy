@@ -1,8 +1,6 @@
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-from porespy.tools import get_tqdm
-
 
 __all__ = [
     'bar',
@@ -10,9 +8,6 @@ __all__ = [
     'show_mesh',
     'show_panels',
 ]
-
-
-tqdm = get_tqdm()
 
 
 def show_panels(im, rc=[3, 3], axis=0):
@@ -23,7 +18,7 @@ def show_panels(im, rc=[3, 3], axis=0):
     ----------
     im : ndarray
         The 3D image to visualize
-    rc : list if ints
+    rc : list of ints
         The number of rows and columns to create
     axis : int
         The axis along which to create the slices
@@ -54,27 +49,27 @@ def show_panels(im, rc=[3, 3], axis=0):
 
 def bar(results, h='pdf', **kwargs):  # pragma: no cover
     r"""
-    Convenience wrapper for matplotlib's ``bar``.
+    Convenience wrapper for matplotlib's `bar`.
 
     This automatically:
 
-        * fetches the ``bin_centers``
-        * fetches the bin heights from the specified ``h``
-        * sets the bin widths
-        * sets the edges to black
+        * Fetches the `bin_centers`
+        * Fetches the bin heights from the specified `h`
+        * Sets the bin widths
+        * Sets the edges to black
 
     Parameters
     ----------
     results : object
         The objects returned by various functions in the
-        ``porespy.metrics`` submodule, such as ``chord_length_distribution``.
+        `porespy.metrics` submodule, such as `chord_length_distribution`.
     h : str
-        The value to use for bin heights.  The default is ``pdf``, but
-        ``cdf`` is another option. Depending on the function the named-tuple
+        The value to use for bin heights.  The default is `pdf`, but
+        `cdf` is another option. Depending on the function the named-tuple
         may have different options.
     kwargs : keyword arguments
-        All other keyword arguments are passed to ``bar``, including
-        ``edgecolor`` if you wish to overwrite the default black.
+        All other keyword arguments are passed to `bar`, including
+        `edgecolor` if you wish to overwrite the default black.
 
     Returns
     -------
@@ -83,22 +78,27 @@ def bar(results, h='pdf', **kwargs):  # pragma: no cover
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/visualization/reference/bar.html>`_
+    <https://porespy.org/examples/visualization/reference/bar.html>`__
     to view online example.
     """
     if 'edgecolor' not in kwargs:
         kwargs['edgecolor'] = 'k'
-    fig = plt.bar(x=results.bin_centers, height=getattr(results, h),
-                  width=results.bin_widths, **kwargs)
+    fig, ax = plt.subplots()
+    ax.bar(
+        x=results.bin_centers,
+        height=getattr(results, h),
+        width=results.bin_widths,
+        **kwargs,
+    )
     xlab = [attr for attr in results.__dir__() if not attr.startswith('_')][0]
-    plt.xlabel(xlab)
-    plt.ylabel(h)
-    return fig
+    ax.set_xlabel(xlab)
+    ax.set_ylabel(h)
+    return fig, ax
 
 
-def imshow(*im, ind=None, axis=None, **kwargs):  # pragma: no cover
+def imshow(im, ind=None, axis=None, **kwargs):  # pragma: no cover
     r"""
-    Convenience wrapper for matplotlib's ``imshow``.
+    Convenience wrapper for matplotlib's `imshow`.
 
     This automatically:
 
@@ -110,57 +110,53 @@ def imshow(*im, ind=None, axis=None, **kwargs):  # pragma: no cover
     Parameters
     ----------
     im : ndarray
-        The 2D or 3D image (or images) to show.  If 2D then all other
-        arguments are ignored.
+        The 2D or 3D image to show.  If 2D then all other arguments are ignored.
     ind : int
-        The slice to show if ``im`` is 3D.  If not given then the middle of
+        The slice to show if `im` is 3D.  If not given then the middle of
         the image is used.
     axis : int
-        The axis to show if ``im`` is 3D.  If not given, then the last
+        The axis to show if `im` is 3D.  If not given, then the last
         axis of the image is used, so an 'lower' slice is shown.
 
     **kwargs
-        All other keyword arguments are passed to ``plt.imshow``
+        All other keyword arguments are passed to `plt.imshow`
 
     Note
     ----
-    ``im`` can also be a series of unnamed arguments, in which case all
-    received images will be shown using ``subplot``.
+    `im` can also be a series of unnamed arguments, in which case all
+    received images will be shown using `subplot`.
 
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/visualization/reference/imshow.html>`_
+    <https://porespy.org/examples/visualization/reference/imshow.html>`__
     to view online example.
     """
     if 'origin' not in kwargs.keys():
         kwargs['origin'] = 'lower'
     if 'interpolation' not in kwargs.keys():
         kwargs['interpolation'] = 'none'
-    if not isinstance(im, tuple):
-        im = tuple([im])
-    for i, image in enumerate(im):
-        if image.ndim == 3:
-            if axis is None:
-                axis = 2
-            if ind is None:
-                ind = int(image.shape[axis]/2)
-            image = image.take(indices=ind, axis=axis)
-        image = np.ma.array(image, mask=image == 0)
-        fig = plt.subplot(1, len(im), i+1)
-        plt.imshow(image, **kwargs)
-    return fig
+    if im.ndim == 3:
+        if axis is None:
+            axis = 2
+        if ind is None:
+            ind = int(im.shape[axis]/2)
+        im = im.take(indices=ind, axis=axis)
+    im = np.ma.array(im, mask=(im == 0))
+    fig, ax = plt.subplots()
+    ax.imshow(im, **kwargs)
+    return fig, ax
 
 
 def show_mesh(mesh):  # pragma: no cover
     r"""
-    Visualizes the mesh of a region as obtained by ``get_mesh`` function in
-    the ``metrics`` submodule.
+    Visualizes the mesh of a region as obtained by `get_mesh` function in the
+    `metrics` submodule.
 
     Parameters
     ----------
     mesh : tuple
-        A mesh returned by ``skimage.measure.marching_cubes``
+        A mesh returned by `skimage.measure.marching_cubes`
 
     Returns
     -------
@@ -170,7 +166,7 @@ def show_mesh(mesh):  # pragma: no cover
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/visualization/reference/show_mesh.html>`_
+    <https://porespy.org/examples/visualization/reference/show_mesh.html>`__
     to view online example.
     """
     try:
@@ -197,4 +193,4 @@ def show_mesh(mesh):  # pragma: no cover
     ax.set_ylim(lim_min[1], lim_max[1])
     ax.set_zlim(lim_min[2], lim_max[2])
 
-    return fig
+    return fig, ax

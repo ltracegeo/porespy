@@ -1,12 +1,8 @@
-import os
-import sys
-from pathlib import Path
-from platform import system
-from os.path import realpath
-import pytest
 import numpy as np
-from numpy.testing import assert_allclose
+import pytest
+
 import porespy as ps
+
 ps.settings.tqdm['disable'] = True
 
 
@@ -14,12 +10,14 @@ class NetworkExtractionTest():
     def setup_class(self):
         self.im = ps.generators.blobs(shape=[300, 300],
                                       seed=0,
-                                      porosity=0.4912888888888889)
+                                      porosity=0.4912888888888889,
+                                      periodic=False,)
         assert self.im.sum()/self.im.size == 0.4912888888888889
         self.snow = ps.filters.snow_partitioning(self.im)
         self.im3d = ps.generators.blobs(shape=[50, 50, 50],
                                         seed=0,
-                                        porosity=0.500144)
+                                        porosity=0.500144,
+                                        periodic=False,)
         assert self.im3d.sum()/self.im3d.size == 0.500144
         self.snow3d = ps.filters.snow_partitioning(self.im3d)
 
@@ -73,11 +71,14 @@ class NetworkExtractionTest():
             mapped = ps.networks.map_to_regions(regions, values)
 
     def test_planar_2d_image(self):
-        im1 = ps.generators.blobs([100, 100, 1], seed=1, porosity=0.4998)
+        im1 = ps.generators.blobs(
+            shape=[100, 100, 1], seed=1, porosity=0.4998, periodic=False,)
         assert im1.sum()/im1.size == 0.4998
-        im2 = ps.generators.blobs([100, 1, 100], seed=1, porosity=0.4998)
+        im2 = ps.generators.blobs(
+            shape=[100, 1, 100], seed=1, porosity=0.4998, periodic=False,)
         assert im2.sum()/im2.size == 0.4998
-        im3 = ps.generators.blobs([1, 100, 100], seed=1, porosity=0.4998)
+        im3 = ps.generators.blobs(
+            shape=[1, 100, 100], seed=1, porosity=0.4998, periodic=False,)
         assert im3.sum()/im3.size == 0.4998
         np.random.seed(1)
         snow_out1 = ps.filters.snow_partitioning(im1)
@@ -97,23 +98,6 @@ class NetworkExtractionTest():
         assert np.allclose(net1['pore.coords'][:, 0], net2['pore.coords'][:, 0])
         assert np.allclose(net1['pore.coords'][:, 1], net2['pore.coords'][:, 2])
         assert np.allclose(net1['pore.coords'][:, 0], net3['pore.coords'][:, 1])
-
-    @pytest.mark.skipif(not sys.platform.startswith("win"), reason="Windows-only!")
-    def test_max_ball(self):
-        path = Path(realpath(__file__), '../../fixtures/pnextract.exe')
-        if system() == 'Windows':
-            ps.networks.maximal_ball_wrapper(im=self.im3d,
-                                             prefix='test_maxball',
-                                             path_to_exe=path,
-                                             voxel_size=1e-6)
-            assert os.path.isfile("test_maxball_link1.dat")
-            assert os.path.isfile("test_maxball_link2.dat")
-            assert os.path.isfile("test_maxball_node1.dat")
-            assert os.path.isfile("test_maxball_node2.dat")
-            os.remove("test_maxball_link1.dat")
-            os.remove("test_maxball_link2.dat")
-            os.remove("test_maxball_node1.dat")
-            os.remove("test_maxball_node2.dat")
 
 
 if __name__ == '__main__':

@@ -1,45 +1,22 @@
 import logging
-import numpy as np
+
 import numba
-from numba import njit, prange, gdb
-from numba.typed import List, Dict
-from numba.core import types
+import numpy as np
 import scipy.ndimage as spim
-from skimage.morphology import disk, ball
-from porespy import settings
+from numba import njit, prange
+from numba.core import types
+from numba.typed import Dict, List
+
 from porespy.tools import (
-    extend_slice,
-    jit_extend_slice,
     center_of_mass,
-)
-from porespy.tools import (
-    get_tqdm,
-    make_contiguous,
+    create_mc_template_list,
+    get_edt,
+    jit_extend_slice,
     jit_marching_cubes_area_and_volume,
     jit_marching_squares_perimeter_and_area,
-    create_mc_template_list,
-    calculate_area_and_volume,
+    make_contiguous,
     pad,
 )
-from porespy.metrics import (
-    region_surface_areas,
-    region_interface_areas,
-    region_volumes,
-)
-try:
-    from pyedt import edt, jit_edt_cpu
-except ModuleNotFoundError:
-    from edt import edt
-
-
-IDLE = np.uint32(0)
-ASSIGNED = np.uint32(1)
-DONE = np.uint32(2)
-FINISHED = np.uint32(3)
-
-FLOAT_TYPE = numba.types.float64[:]
-INT_TYPE = numba.types.int64[:]
-
 
 __all__ = [
     "regions_to_network_parallel",
@@ -47,8 +24,25 @@ __all__ = [
 ]
 
 
-tqdm = get_tqdm()
 logger = logging.getLogger(__name__)
+edt = get_edt()
+
+
+# edt_import_status is caught here during the import of porespy, but if an
+# error occurs it is raised inside the function that actually uses it
+try:
+    from pyedt import jit_edt_cpu
+    edt_import_status = None
+except ModuleNotFoundError as e:
+    edt_import_status = e
+
+
+IDLE = np.uint32(0)
+ASSIGNED = np.uint32(1)
+DONE = np.uint32(2)
+FINISHED = np.uint32(3)
+FLOAT_TYPE = numba.types.float64[:]
+INT_TYPE = numba.types.int64[:]
 
 
 @njit
@@ -202,10 +196,13 @@ def regions_to_network_parallel(
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/networks/reference/regions_to_network.html>`_
+    <https://porespy.org/examples/networks/reference/regions_to_network.html>`__
     to view online example.
 
     """
+    if edt_import_status is not None:
+        raise edt_import_status
+
     logger.info('Extracting pore/throat information')
     template_areas, template_volumes = create_mc_template_list(spacing=voxel_size)
     vertex_index_array = np.array([2**i for i in range(8)])
@@ -389,9 +386,21 @@ def _get_throats(
                 )
     
     ax_neighbours = {
-        0: [(0, a, b) for a in range(-1,2) for b in range(-1,2) if (a != 0 or b != 0)],
-        1: [(a, 0, b) for a in range(-1,2) for b in range(-1,2) if (a != 0 or b != 0)],
-        2: [(a, b, 0) for a in range(-1,2) for b in range(-1,2) if (a != 0 or b != 0)],
+        0: (
+            (0, -1, -1), (0, -1, 0), (0, -1, 1),
+            (0, 0, -1),              (0, 0, 1),
+            (0, 1, -1),  (0, 1, 0),  (0, 1, 1)
+        ),
+        1: (
+            (-1, 0, -1), (-1, 0, 0), (-1, 0, 1),
+            (0, 0, -1),              (0, 0, 1),
+            (1, 0, -1),  (1, 0, 0),  (1, 0, 1)
+        ),
+        2: (
+            (-1, -1, 0), (-1, 0, 0), (-1, 1, 0),
+            (0, -1, 0),              (0, 1, 0),
+            (1, -1, 0),  (1, 0, 0),  (1, 1, 0)
+        ),
     }
 
     for x in range(1, w - 1):

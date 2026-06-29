@@ -1,85 +1,359 @@
+import inspect
 import logging
+
 import numpy as np
+import numpy.typing as npt
 import scipy.ndimage as spim
 import scipy.spatial as sptl
+import scipy.stats as spst
+from deprecated import deprecated
+from numba import njit
 from scipy import fft as sp_ft
 from skimage.measure import regionprops
-from deprecated import deprecated
-from porespy.tools import extend_slice
-from porespy.tools import _check_for_singleton_axes
-from porespy.tools import Results
-from porespy import settings
-from porespy.tools import get_tqdm
-from numba import njit
+from skimage.morphology import ball, disk, skeletonize, footprint_rectangle
+
+from porespy.generators import faces
+from porespy.filters import (
+    local_thickness,
+    pc_to_seq,
+    find_closed_pores,
+    find_surface_pores,
+)
+from porespy.tools import (
+    Results,
+    _check_for_singleton_axes,
+    get_edt,
+    get_slices_slabs,
+    get_tqdm,
+    settings,
+)
 
 
 __all__ = [
+    "bond_number",
     "boxcount",
     "chord_counts",
     "chord_length_distribution",
     "find_h",
+    "find_porosity_threshold",
+    "is_percolating",
     "lineal_path_distribution",
     "pore_size_distribution",
     "radial_density_distribution",
     "porosity",
+    "find_porosity_threshold",
     "porosity_profile",
-    "representative_elementary_volume",
     "satn_profile",
     "two_point_correlation",
+    "percolating_porosity",
     "phase_fraction",
-    "pc_curve",
-    "pc_curve_from_ibip",
-    "pc_curve_from_mio",
     "pc_map_to_pc_curve",
+    "percolating_porosity",
+    "phase_fraction",
+    "pore_size_distribution",
+    "porosity",
+    "porosity_by_type",
+    "porosity_profile",
+    "radial_density_distribution",
+    "satn_profile",
+    "two_point_correlation",
 ]
 
 
+edt = get_edt()
 tqdm = get_tqdm()
 logger = logging.getLogger(__name__)
+strel = {
+    2: {"min": disk(1), "max": footprint_rectangle((3, 3))},
+    3: {"min": ball(1), "max": footprint_rectangle((3, 3, 3))}
+}
 
 
-def boxcount(im, bins=10):
+def porosity_by_type(im, conn='min'):
     r"""
-    Calculates fractal dimension of an image using the tiled box counting
-    method [1]_
+    Computes different types of porosity in an image including total, closed, and
+    surface
 
     Parameters
     ----------
     im : ndarray
-        The image of the porous material.
-    bins : int or array_like, optional
-        The number of box sizes to use. The default is 10 sizes
-        logarithmically spaced between 1 and ``min(im.shape)``.
-        If an array is provided, this is used directly.
+        An image of the void space with 1 (or `True`) representing the phase of
+        interest.  The bulk volume will be computed as the sum of 0's and 1's.
+    conn : str
+        Can be either `'min'` or `'max'` and controls the shape of the structuring
+        element used to determine voxel connectivity.  The default if `'min'` which
+        imposes the strictest criteria, so that voxels must share a face to be
+        considered connected.
 
     Returns
     -------
     results
-        An object possessing the following attributes:
+        A dataclass-like object with the following attributes:
 
-        size : ndarray
-            The box sizes used
-        count : ndarray
-            The number of boxes of each size that contain both solid and void
-        slope : ndarray
-            The gradient of ``count``. This has the same number of elements as
-            ``count`` and
+        ==========  ================================================================
+        Attribute   Description
+        ==========  ================================================================
+        `total`     The total fraction of the image which is void phase
+        `closed`    The fraction of the image which consists isolated voids
+        `surface`   The fraction of the image which are pores only the surfaces
+        ==========  ================================================================
 
-    References
+            Examples
+    --------
+    `Click here
+    <https://porespy.org/examples/metrics/reference/porosity_by_type.html>`_
+    to view online example.
+    """
+    Vb = np.sum((im == 1) + (im == 0), dtype=np.float64)
+    temp = im == 1
+    eps_total = np.sum(temp, dtype=np.float64)/Vb
+    temp = find_closed_pores(im, conn=conn)
+    eps_closed = np.sum(temp, dtype=np.float64)/Vb
+    temp = find_surface_pores(im, conn=conn)
+    eps_surface = np.sum(temp, dtype=np.float64)/Vb
+
+    r = Results()
+    r.total = eps_total
+    r.closed = eps_closed
+    r.surface = eps_surface
+    return r
+
+
+def is_percolating(im, axis=None, inlets=None, outlets=None, conn='min'):
+    r"""
+    Determines if a percolating path exists across the domain (in the specified
+    direction) or between given inlets and outlets.
+
+    Parameters
     ----------
-    .. [1] See Boxcounting on `Wikipedia <https://en.wikipedia.org/wiki/Box_counting>`_
+    im : ndarray
+        Image of the void space with `True` indicating void space.
+    axis : int
+        The axis along which percolation is checked. If `None` (default) then
+        percolation is checked in all dimensions.
+    conn : str
+        Can be either `'min'` or `'max'` and controls the shape of the structuring
+        element used to determine voxel connectivity.  The default if `'min'` which
+        imposes the strictest criteria, so that voxels must share a face to be
+        considered connected.
+
+    Returns
+    -------
+    percolating : bool or list of bools
+        A boolean value indicating if the domain percolates in the given direction.
+        If `axis=None` then all directions are checked and the result is returned
+        as a list like `[True, False, True]` indicating that the domain percolates
+        in the `x` and `z` directions, but not `y`.
 
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/metrics/reference/box_counting.html>`_
+    <https://porespy.org/examples/metrics/reference/is_percolating.html>`_
+    to view online example.
+
+    """
+    if (inlets is not None) and (outlets is not None):
+        pass
+    elif axis is not None:
+        im = np.swapaxes(im, 0, axis) == 1
+        inlets = np.zeros_like(im)
+        inlets[0, ...] = True
+        inlets *= im
+        outlets = np.zeros_like(im)
+        outlets[-1, ...] = True
+        outlets *= im
+    else:
+        ans = []
+        for ax in range(im.ndim):
+            ans.append(is_percolating(im, axis=ax, conn=conn))
+        return ans
+
+    labels, N = spim.label(im, structure=strel[im.ndim][conn])
+    a = np.unique(labels[inlets])
+    a = a[a > 0]
+    b = np.unique(labels[outlets])
+    b = b[b > 0]
+    hits = np.isin(a, b)
+    return np.any(hits)
+
+
+def find_porosity_threshold(im, axis=0, dt=None, conn="min"):
+    r"""
+    Finds the porosity of the image at the percolation threshold
+
+    This function progressively dilates the solid and reports the porosity at the
+    step just before there are no percolating paths (in the specified direction)
+
+    Parameters
+    ----------
+    im : ndarray
+        Image of the void space with `True` indicating void space
+    axis : int
+        The axis along which percolation is checked
+    dt : ndarray
+        The distance transform of the void space. If not provide it will be computed
+        so providing one can save time if it is available.
+    conn : str
+        Can be either `'min'` or `'max'` and controls the shape of the structuring
+        element used to determine voxel connectivity.  The default if `'min'` which
+        imposes the strictest criteria, so that voxels must share a face to be
+        considered connected.
+
+    Returns
+    -------
+    results
+        A Results object with the following attributes:
+
+        ================ ===========================================================
+        Attribute        Description
+        ================ ===========================================================
+        eps_orig         The total porosity of the original image, including closed
+                         and surface pores
+        eps_orig_perc    The percolating porosity of the original image (i.e. with
+                         closed and surface pores filled)
+        eps_thresh       The total porosity of the image just before the percolation
+                         threshold was reached (i.e at the point where one
+                         additional dilation would result in no connected void
+                         space.)
+        eps_thresh_perc  The percolating porosity (with closed and surface pores
+                         filled) just before the percolation threshold was reached
+                         (i.e at the point where one additional dilation would
+                         result in no connected void space.)
+        eps_thresh_post  The total porosity after the percolation threshold was
+                         reached (i.e. one step *after* the dilation which
+                         resulted in no connected pore space)
+        R                The threshold to apply to the distance transform to
+                         obtain the percolating image (i.e. im = dt >= R)
+        ================ ===========================================================
+
+    Examples
+    --------
+    `Click here
+    <https://porespy.org/examples/metrics/reference/find_porosity_threshold.html>`_
+    to view online example.
+
+    """
+    if axis is None:
+        raise Exception("axis must be specified")
+
+    def _check_percolation(dt, R, step, axis, conn):
+        while True:
+            im2 = dt >= R
+            check = np.array(is_percolating(im2, axis=axis, conn=conn))
+            if not np.all(check):
+                break
+            R += step
+        return R
+
+    if dt is None:
+        dt = edt(im)
+
+    # Take large steps first, then medium and small steps to find final value faster
+    R = _check_percolation(dt, R=1, step=10, axis=axis, conn=conn)
+    R = _check_percolation(dt, R=max(1, R - 10), step=4, axis=axis, conn=conn)
+    R = _check_percolation(dt, R=max(1, R - 4), step=1, axis=axis, conn=conn)
+
+    im2 = dt >= (R - 1)
+    im3 = dt >= R
+
+    r = Results()
+    r.eps_orig = porosity(im)
+    r.eps_orig_perc = percolating_porosity(im, axis=axis, conn=conn)
+    r.eps_thresh = porosity(im2)
+    r.eps_thresh_perc = percolating_porosity(im2, axis=axis, conn=conn)
+    r.eps_thresh_post = porosity(im3)
+    r.R = R - 1
+    return r
+
+
+def percolating_porosity(im, axis=0, inlets=None, outlets=None, conn="min"):
+    r"""
+    Finds volume fraction of void space which belongs to percolating paths
+    across the domain in the direction specified.
+
+    Parameters
+    ----------
+    im : ndarray
+        Image of the void space with `True` indicating void space
+    axis : int
+        The axis along which percolation is checked
+    conn : str
+        Can be either `'min'` or `'max'` and controls the shape of the structuring
+        element used to determine voxel connectivity.  The default if `'min'` which
+        imposes the strictest criteria, so that voxels must share a face to be
+        considered connected.
+    inlets, outlets : ndarrays, optional
+        Boolean arrays indicating the locations of the inlets and outlets. These
+        are useful if the domain is not cubic or if special inlet and outlet
+        locations are desired.
+
+    Examples
+    --------
+    `Click here
+    <https://porespy.org/examples/metrics/reference/percolating_porosity.html>`_
+    to view online example.
+    """
+    se = strel[im.ndim][conn]
+    if (inlets is None) and (outlets is None):
+        inlets = faces(im.shape, inlet=axis)
+        outlets = faces(im.shape, outlet=axis)
+    labels, N = spim.label(im, structure=se)
+    a = np.unique(labels[inlets])
+    a = a[a > 0]
+    b = np.unique(labels[outlets])
+    b = b[b > 0]
+    hits = np.intersect1d(a, b)
+    im3 = np.isin(labels, hits)
+    eps = im3.sum()/im3.size
+    return eps
+
+
+def boxcount(im, bins=10):
+    r"""
+    Calculates the fractal dimension of an image using the tiled box counting
+    method [1a]_
+
+    Parameters
+    ----------
+    im : ndarray
+        A boolean image of the porous material with `True` values indicating the
+        phase of interest.
+    bins : int or array_like, optional
+        The number of box sizes to use. The default is 10 sizes logarithmically
+        spaced between 1 and ``min(im.shape)``. If an array is provided, this is
+        used directly.
+
+    Returns
+    -------
+    results : dataclass-like
+        An object possessing the following attributes:
+
+        ========== =================================================================
+        Attribute  Description
+        ========== =================================================================
+        size       An array containing the specific box sizes used
+        count      An array containing the number of boxes of each size that
+                   contain both solid and void
+        slope      The gradient of ``count``. This has the same number of elements
+                   as ``count``.
+        ========== =================================================================
+
+    References
+    ----------
+    .. [1a] Read more about box counting on `Wikipedia
+       <https://en.wikipedia.org/wiki/Box_counting>`_
+
+    Examples
+    --------
+    `Click here
+    <https://porespy.org/examples/metrics/reference/boxcount.html>`_
     to view online example.
 
     """
     im = np.array(im, dtype=bool)
 
-    if (len(im.shape) != 2 and len(im.shape) != 3):
-        raise Exception('Image must be 2-dimensional or 3-dimensional')
+    if len(im.shape) != 2 and len(im.shape) != 3:
+        raise Exception("Image must be 2-dimensional or 3-dimensional")
 
     if isinstance(bins, int):
         Ds = np.unique(np.logspace(1, np.log10(min(im.shape)), bins).astype(int))
@@ -87,21 +361,22 @@ def boxcount(im, bins=10):
         Ds = np.array(bins).astype(int)
 
     N = []
-    for d in tqdm(Ds, **settings.tqdm):
+    desc = inspect.currentframe().f_code.co_name  # Get current func name
+    for d in tqdm(Ds, desc=desc, **settings.tqdm):
         result = 0
         for i in range(0, im.shape[0], d):
             for j in range(0, im.shape[1], d):
                 if len(im.shape) == 2:
-                    temp = im[i:i+d, j:j+d]
+                    temp = im[i:i + d, j:j + d]
                     result += np.any(temp)
                     result -= np.all(temp)
                 else:
                     for k in range(0, im.shape[2], d):
-                        temp = im[i:i+d, j:j+d, k:k+d]
+                        temp = im[i:i + d, j:j + d, k:k + d]
                         result += np.any(temp)
                         result -= np.all(temp)
         N.append(result)
-    slope = -1*np.gradient(np.log(np.array(N)), np.log(Ds))
+    slope = -1 * np.gradient(np.log(np.array(N)), np.log(Ds))
     data = Results()
     data.size = Ds
     data.count = N
@@ -109,87 +384,10 @@ def boxcount(im, bins=10):
     return data
 
 
-def representative_elementary_volume(im, npoints=1000):
-    r"""
-    Calculates the porosity of an image as a function subdomain size.
-
-    This function extracts a specified number of subdomains of random size,
-    then finds their porosity.
-
-    Parameters
-    ----------
-    im : ndarray
-        The image of the porous material
-    npoints : int
-        The number of randomly located and sized boxes to sample.  The default
-        is 1000.
-
-    Returns
-    -------
-    result : Results object
-        A custom object with the following data added as named attributes:
-
-        'volume'
-            The total volume of each cubic subdomain tested
-        'porosity'
-            The porosity of each subdomain tested
-
-        These attributes can be conveniently plotted by passing the Results
-        object to matplotlib's ``plot`` function using the
-        \* notation: ``plt.plot(\*result, 'b.')``.  The resulting plot is
-        similar to the sketch given by Bachmat and Bear [1]_
-
-    Notes
-    -----
-    This function is frustratingly slow.  Profiling indicates that all the time
-    is spent on scipy's ``sum`` function which is needed to sum the number of
-    void voxels (1's) in each subdomain.
-
-    References
-    ----------
-    .. [1] Bachmat and Bear. On the Concept and Size of a Representative
-       Elementary Volume (Rev), Advances in Transport Phenomena in Porous Media
-       (1987)
-
-    Examples
-    --------
-    `Click here
-    <https://porespy.org/examples/metrics/reference/representative_elementary_volume.html>`_
-    to view online example.
-
-    """
-    # TODO: this function is a prime target for parallelization since the
-    # ``npoints`` are calculated independenlty.
-    im_temp = np.zeros_like(im)
-    crds = np.array(np.random.rand(npoints, im.ndim) * im.shape, dtype=int)
-    pads = np.array(np.random.rand(npoints) * np.amin(im.shape) / 2 + 10, dtype=int)
-    im_temp[tuple(crds.T)] = True
-    labels, N = spim.label(input=im_temp)
-    slices = spim.find_objects(input=labels)
-    porosity = np.zeros(shape=(N,), dtype=float)
-    volume = np.zeros(shape=(N,), dtype=int)
-    for i in tqdm(np.arange(0, N), **settings.tqdm):
-        s = slices[i]
-        p = pads[i]
-        new_s = extend_slice(s, shape=im.shape, pad=p)
-        temp = im[new_s]
-        Vp = np.sum(temp, dtype=np.int64)
-        Vt = np.size(temp)
-        porosity[i] = Vp / Vt
-        volume[i] = Vt
-    profile = Results()
-    profile.volume = volume
-    profile.porosity = porosity
-    return profile
-
-
-def porosity(im):
+def porosity(im, mask=None, fill_closed=False, fill_surface=False):
     r"""
     Calculates the porosity of an image assuming 1's are void space and 0's
     are solid phase.
-
-    All other values are ignored, so this can also return the relative
-    fraction of a phase of interest in multiphase images.
 
     Parameters
     ----------
@@ -197,6 +395,18 @@ def porosity(im):
         Image of the void space with 1's indicating void phase (or ``True``)
         and 0's indicating the solid phase (or ``False``). All other values
         are ignored (see Notes).
+    mask : ndarray
+        An image the same size as `im` with `True` values indicting the domain. This
+        argument is optional, but can be provided for images that don't fill the
+        entire array, like cylindrical cores.  Note that setting values in `im`
+        to 2 will also exclude them from consideration so provides the same effect
+        as `mask`, but providing a `mask` is usually much easier.
+    fill_closed : bool (default = `False`)
+        A flag to indicate if closed pores (not connected to any image boundary)
+        should be filled or not before computing the porosity.
+    fill_surface : bool (default = `False`)
+        A flag to indicate if surface pores connected only to one surface should be
+        filled or not before computing the porosity.
 
     Returns
     -------
@@ -214,26 +424,30 @@ def porosity(im):
     other values are ignored.  This is useful, for example, for images of
     cylindrical cores, where all voxels outside the core are labelled with 2.
 
-    Alternatively, images can be processed with ``find_disconnected_voxels``
-    to get an image of only blind pores.  This can then be added to the orignal
-    image such that blind pores have a value of 2, thus allowing the
-    calculation of accessible porosity, rather than overall porosity.
-
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/metrics/reference/porosity.html>`_
+    <https://porespy.org/examples/metrics/reference/porosity.html>`__
     to view online example.
 
     """
-    im = np.array(im, dtype=np.int64)
+    im = im.copy()
+    if mask is not None:
+        im = np.array(im, dtype=np.int64) * mask
+    if fill_closed or fill_surface:
+        closed_pores = im * find_closed_pores(im)
+        surface_pores = im * find_surface_pores(im) * ~closed_pores
+        if fill_closed:
+            im[closed_pores] = 0
+        if fill_surface:
+            im[surface_pores] = 0
     Vp = np.sum(im == 1, dtype=np.int64)
     Vs = np.sum(im == 0, dtype=np.int64)
     e = Vp / (Vs + Vp)
     return e
 
 
-def porosity_profile(im, axis=0):
+def porosity_profile(im, axis=0, span=1, mode="tile"):
     r"""
     Computes the porosity profile along the specified axis
 
@@ -243,9 +457,36 @@ def porosity_profile(im, axis=0):
         The volumetric image for which to calculate the porosity profile.  All
         voxels with a value of 1 (or ``True``) are considered as void.
     axis : int
-        The axis (0, 1, or 2) along which to calculate the profile.  For
-        instance, if `axis` is 0, then the porosity in each YZ plane is
-        calculated and returned as 1D array with 1 value for each X position.
+        The axis along which to profile should be measured
+    span : int (Default = 1)
+        The thickness of layers to include in the moving average calculation.
+    mode : str (Default = 'tile')
+        How the moving average should be applied. Options are:
+
+        ======== ==============================================================
+        mode     description
+        ======== ==============================================================
+        'tile'   The average is computed for discrete non-overlapping
+                 tiles of a size given by ``span``
+        'slide'  The average is computed in a moving window starting at
+                 ``span/2`` and sliding by a single voxel. This method
+                 provides more data points but is slower.
+        ======== ==============================================================
+
+    Returns
+    -------
+    results : dataclass
+        Results is a custom class with the following attributes:
+
+        ============= =========================================================
+        Attribute     Description
+        ============= =========================================================
+        position      The position along the given axis at which porosity
+                      values are computed, corresponding to the middle of each
+                      slice, whether the mode was `'tile'` or `'slide'`.
+                      The units are in voxels.
+        porosity      The local porosity value at each position.
+        ============= =========================================================
 
     Returns
     -------
@@ -255,25 +496,31 @@ def porosity_profile(im, axis=0):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/metrics/reference/porosity_profile.html>`_
+    <https://porespy.org/examples/metrics/reference/porosity_profile.html>`__
     to view online example.
 
     """
     if axis >= im.ndim:
-        raise Exception('axis out of range')
-    im = np.atleast_3d(im)
-    a = set(range(im.ndim)).difference(set([axis]))
-    a1, a2 = a
-    tmp = np.sum(np.sum(im == 1, axis=a2, dtype=np.int64), axis=a1, dtype=np.int64)
-    prof = tmp / (im.shape[a2] * im.shape[a1])
-    return prof
+        raise Exception("axis out of range")
+    slices = get_slices_slabs(im=im, axis=axis, span=span, mode=mode)
+    eps = np.zeros(len(slices))
+    z = np.zeros_like(eps)
+    for i, s in enumerate(slices):
+        num = (im[s] == 1).sum(dtype=np.float64)
+        denom = ((im[s] == 1) + (im[s] == 0)).sum(dtype=np.float64)
+        eps[i] = num / denom
+        z[i] = (s[axis].start + s[axis].stop) / 2
+    results = Results()
+    results.position = z
+    results.porosity = eps
+    return results
 
 
 def radial_density_distribution(dt, bins=10, log=False, voxel_size=1):
     r"""
     Computes radial density function by analyzing the histogram of voxel
     values in the distance transform.  This function is defined by
-    Torquato [1] as:
+    Torquato [1b]_ as:
 
         .. math::
 
@@ -307,8 +554,8 @@ def radial_density_distribution(dt, bins=10, log=False, voxel_size=1):
     log : boolean
         If ``True`` the size data is converted to log (base-10)
         values before processing.  This can help to plot wide size
-        distributions or to better visualize the in the small size region.
-        Note that you should not anti-log the radii values in the retunred
+        distributions or to better visualize the radii in the small size region.
+        Note that you should not anti-log the radii values in the returned
         ``tuple``, since the binning is performed on the logged radii values.
     voxel_size : scalar
         The size of a voxel side in preferred units.  The default is 1, so the
@@ -341,13 +588,13 @@ def radial_density_distribution(dt, bins=10, log=False, voxel_size=1):
 
     References
     ----------
-    [1] Torquato, S. Random Heterogeneous Materials: Mircostructure and
-    Macroscopic Properties. Springer, New York (2002) - See page 48 & 292
+    .. [1b] Torquato, S. Random Heterogeneous Materials: Mircostructure and
+       Macroscopic Properties. Springer, New York (2002) - See page 48 & 292
 
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/metrics/reference/radial_density.html>`_
+    <https://porespy.org/examples/metrics/reference/radial_density.html>`__
     to view online example.
 
     """
@@ -358,7 +605,7 @@ def radial_density_distribution(dt, bins=10, log=False, voxel_size=1):
     h = np.histogram(x, bins=bins, density=True)
     h = _parse_histogram(h=h, voxel_size=voxel_size)
     rdf = Results()
-    rdf[f"{log*'Log' + 'R'}"] = h.bin_centers
+    rdf[f"{log * 'Log' + 'R'}"] = h.bin_centers
     rdf.pdf = h.pdf
     rdf.cdf = h.cdf
     rdf.relfreq = h.relfreq
@@ -373,9 +620,9 @@ def lineal_path_distribution(im, bins=10, voxel_size=1, log=False):
     Determines the probability that a point lies within a certain distance
     of the opposite phase *along a specified direction*
 
-    This relates directly the radial density function defined by Torquato [1],
+    This relates directly the radial density function defined by Torquato [1c]_,
     but instead of reporting the probability of lying within a stated distance
-    to the nearest solid in any direciton, it considers only linear distances
+    to the nearest solid in any direction, it considers only linear distances
     along orthogonal directions.The benefit of this is that anisotropy can be
     detected in materials by performing the analysis in multiple orthogonal
     directions.
@@ -395,7 +642,7 @@ def lineal_path_distribution(im, bins=10, voxel_size=1, log=False):
         If ``True`` (default) the size data is converted to log (base-10)
         values before processing.  This can help to plot wide size
         distributions or to better visualize data in the small size region.
-        Note that you should not anti-log the radii values in the retunred
+        Note that you should not anti-log the radii values in the returned
         ``results``, since the binning is performed on the logged radii values.
 
     Returns
@@ -403,34 +650,31 @@ def lineal_path_distribution(im, bins=10, voxel_size=1, log=False):
     result : Results object
         A custom object with the following data added as named attributes:
 
-        *L* or *LogL*
-            Length, equivalent to ``bin_centers``
-        *pdf*
-            Probability density function
-        *cdf*
-            Cumulative density function
-        *relfreq*
-            Relative frequency chords in each bin.  The sum of all bin
-            heights is 1.0.  For the cumulative relativce, use *cdf* which is
-            already normalized to 1.
-        *bin_centers*
-            The center point of each bin
-        *bin_edges*
-            Locations of bin divisions, including 1 more value than
-            the number of bins
-        *bin_widths*
-            Useful for passing to the ``width`` argument of
-            ``matplotlib.pyplot.bar``
+        =============== =============================================================
+        Description     Attribute
+        =============== =============================================================
+        *L* or *LogL*   Length, equivalent to ``bin_centers``
+        *pdf*           Probability density function
+        *cdf*           Cumulative density function
+        *relfreq*       Relative frequency chords in each bin.  The sum of all bin
+                        heights is 1.0.  For the cumulative relative, use *cdf*
+                        which is already normalized to 1.
+        *bin_centers*   The center point of each bin
+        *bin_edges*     Locations of bin divisions, including 1 more value than
+                        the number of bins
+        *bin_widths*    Useful for passing to the ``width`` argument of
+                        ``matplotlib.pyplot.bar``
+        =============== =============================================================
 
     References
     ----------
-    [1] Torquato, S. Random Heterogeneous Materials: Mircostructure and
-    Macroscopic Properties. Springer, New York (2002)
+    .. [1c] Torquato, S. Random Heterogeneous Materials: Microstructure and
+       Macroscopic Properties. Springer, New York (2002)
 
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/metrics/reference/linearl_path_distribution.html>`_
+    <https://porespy.org/examples/metrics/reference/linearl_path_distribution.html>`__
     to view online example.
 
     """
@@ -440,7 +684,7 @@ def lineal_path_distribution(im, bins=10, voxel_size=1, log=False):
     h = list(np.histogram(x, bins=bins, density=True))
     h = _parse_histogram(h=h, voxel_size=voxel_size)
     cld = Results()
-    cld[f"{log*'Log' + 'L'}"] = h.bin_centers
+    cld[f"{log * 'Log' + 'L'}"] = h.bin_centers
     cld.pdf = h.pdf
     cld.cdf = h.cdf
     cld.relfreq = h.relfreq
@@ -450,8 +694,13 @@ def lineal_path_distribution(im, bins=10, voxel_size=1, log=False):
     return cld
 
 
-def chord_length_distribution(im, bins=10, log=False, voxel_size=1,
-                              normalization='count'):
+def chord_length_distribution(
+    im,
+    bins=10,
+    log=False,
+    voxel_size=1,
+    normalization="count",
+):
     r"""
     Determines the distribution of chord lengths in an image containing chords.
 
@@ -462,7 +711,7 @@ def chord_length_distribution(im, bins=10, log=False, voxel_size=1,
         ``apply_chords`` or ``apply_chords_3d``.  ``im`` can be either boolean,
         in which case each chord will be identified using ``scipy.ndimage.label``,
         or numerical values in case it is assumed that chords have already been
-        identifed and labeled. In both cases, the size of each chord will be
+        identified and labeled. In both cases, the size of each chord will be
         computed as the number of voxels belonging to each labelled region.
     bins : scalar or array_like
         If a scalar is given it is interpreted as the number of bins to use,
@@ -471,7 +720,7 @@ def chord_length_distribution(im, bins=10, log=False, voxel_size=1,
         If ``True`` (default) the size data is converted to log (base-10)
         values before processing.  This can help to plot wide size
         distributions or to better visualize the in the small size region.
-        Note that you should not anti-log the radii values in the retunred
+        Note that you should not anti-log the radii values in the returned
         ``tuple``, since the binning is performed on the logged radii values.
     normalization : string
         Indicates how to normalize the bin heights.  Options are:
@@ -479,11 +728,12 @@ def chord_length_distribution(im, bins=10, log=False, voxel_size=1,
         *'count' or 'number'*
             (default) This simply counts the number of chords in each bin in
             the normal sense of a histogram.  This is the rigorous definition
-            according to Torquato [1].
+            according to Torquato [1d]_.
+
         *'length'*
             This multiplies the number of chords in each bin by the
             chord length (i.e. bin size).  The normalization scheme accounts for
-            the fact that long chords are less frequent than shorert chords,
+            the fact that long chords are less frequent than shorter chords,
             thus giving a more balanced distribution.
 
     voxel_size : scalar
@@ -495,34 +745,31 @@ def chord_length_distribution(im, bins=10, log=False, voxel_size=1,
     result : Results object
         A custom object with the following data added as named attributes:
 
-        *L* or *LogL*
-            Chord length, equivalent to ``bin_centers``
-        *pdf*
-            Probability density function
-        *cdf*
-            Cumulative density function
-        *relfreq*
-            Relative frequency chords in each bin.  The sum of all bin
-            heights is 1.0.  For the cumulative relativce, use *cdf* which is
-            already normalized to 1.
-        *bin_centers*
-            The center point of each bin
-        *bin_edges*
-            Locations of bin divisions, including 1 more value than
-            the number of bins
-        *bin_widths*
-            Useful for passing to the ``width`` argument of
-            ``matplotlib.pyplot.bar``
+        =============== =============================================================
+        Attribute       Description
+        =============== =============================================================
+        *L* or *LogL*   Chord length, equivalent to ``bin_centers``
+        *pdf*           Probability density function
+        *cdf*           Cumulative density function
+        *relfreq*       Relative frequency chords in each bin.  The sum of all bin
+                        heights is 1.0.  For the cumulative relative, use *cdf*
+                        which is already normalized to 1.
+        *bin_centers*   The center point of each bin
+        *bin_edges*     Locations of bin divisions, including 1 more value than
+                        the number of bins
+        *bin_widths*    Useful for passing to the ``width`` argument of
+                        ``matplotlib.pyplot.bar``
+        =============== =============================================================
 
     References
     ----------
-    [1] Torquato, S. Random Heterogeneous Materials: Mircostructure and
-    Macroscopic Properties. Springer, New York (2002) - See page 45 & 292
+    .. [1d] Torquato, S. Random Heterogeneous Materials: Microstructure and
+       Macroscopic Properties. Springer, New York (2002) - See page 45 & 292
 
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/metrics/reference/chord_length_distribution.html>`_
+    <https://porespy.org/examples/metrics/reference/chord_length_distribution.html>`__
     to view online example.
 
     """
@@ -532,19 +779,19 @@ def chord_length_distribution(im, bins=10, log=False, voxel_size=1,
     x = x * voxel_size
     if log:
         x = np.log10(x)
-    if normalization == 'length':
+    if normalization == "length":
         h = list(np.histogram(x, bins=bins, density=False))
         # Scale bin heigths by length
         h[0] = h[0] * (h[1][1:] + h[1][:-1]) / 2
         # Normalize h[0] manually
         h[0] = h[0] / h[0].sum(dtype=np.int64) / (h[1][1:] - h[1][:-1])
-    elif normalization in ['number', 'count']:
+    elif normalization in ["number", "count"]:
         h = np.histogram(x, bins=bins, density=True)
     else:
-        raise Exception('Unsupported normalization:', normalization)
+        raise Exception("Unsupported normalization:", normalization)
     h = _parse_histogram(h)
     cld = Results()
-    cld[f"{log*'Log' + 'L'}"] = h.bin_centers
+    cld[f"{log * 'Log' + 'L'}"] = h.bin_centers
     cld.pdf = h.pdf
     cld.cdf = h.cdf
     cld.relfreq = h.relfreq
@@ -572,7 +819,7 @@ def pore_size_distribution(im, bins=10, log=True, voxel_size=1):
         If ``True`` (default) the size data is converted to log (base-10)
         values before processing.  This can help to plot wide size
         distributions or to better visualize the in the small size region.
-        Note that you should not anti-log the radii values in the retunred
+        Note that you should not anti-log the radii values in the returned
         ``tuple``, since the binning is performed on the logged radii values.
     voxel_size : scalar
         The size of a voxel side in preferred units.  The default is 1, so the
@@ -583,35 +830,25 @@ def pore_size_distribution(im, bins=10, log=True, voxel_size=1):
     result : Results object
         A custom object with the following data added as named attributes:
 
-        *R* or *logR*
-            Radius, equivalent to ``bin_centers``
-        *pdf*
-            Probability density function
-        *cdf*
-            Cumulative density function
-        *satn*
-            Phase saturation in differential form.  For the cumulative
-            saturation, just use *cfd* which is already normalized to 1.
-        *bin_centers*
-            The center point of each bin
-        *bin_edges*
-            Locations of bin divisions, including 1 more value than
-            the number of bins
-        *bin_widths*
-            Useful for passing to the ``width`` argument of
-            ``matplotlib.pyplot.bar``
-
-    Notes
-    -----
-    (1) To ensure the returned values represent actual sizes you can manually
-    scale the input image by the voxel size first (``im *= voxel_size``)
-
-    plt.bar(psd.R, psd.satn, width=psd.bin_widths, edgecolor='k')
+        =============== =============================================================
+        Attribute       Description
+        =============== =============================================================
+        *R* or *logR*   Radius, equivalent to ``bin_centers``
+        *pdf*           Probability density function
+        *cdf*           Cumulative density function
+        *satn*          Phase saturation in differential form.  For the cumulative
+                        saturation, just use *cfd* which is already normalized to 1.
+        *bin_centers*   The center point of each bin
+        *bin_edges*     Locations of bin divisions, including 1 more value than
+                        the number of bins
+        *bin_widths*    Useful for passing to the ``width`` argument of
+                        ``matplotlib.pyplot.bar``
+        =============== =============================================================
 
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/metrics/reference/pore_size_distribution.html>`_
+    <https://porespy.org/examples/metrics/reference/pore_size_distribution.html>`__
     to view online example.
 
     """
@@ -621,7 +858,7 @@ def pore_size_distribution(im, bins=10, log=True, voxel_size=1):
         vals = np.log10(vals)
     h = _parse_histogram(np.histogram(vals, bins=bins, density=True))
     cld = Results()
-    cld[f"{log*'Log' + 'R'}"] = h.bin_centers
+    cld[f"{log * 'Log' + 'R'}"] = h.bin_centers
     cld.pdf = h.pdf
     cld.cdf = h.cdf
     cld.satn = h.relfreq
@@ -651,8 +888,7 @@ def two_point_correlation_bf(im, spacing=10):
 
         'distance'
             The distance between two points. The distance values are binned
-            as:
-        $$ bins = range(start=0, stop=np.amin(im.shape)/2, stride=spacing) $$
+            as: ``bins = range(start=0, stop=np.amin(im.shape)/2, stride=spacing)``
 
         'probability'
             The probability that two points of the stated separation distance
@@ -670,23 +906,21 @@ def two_point_correlation_bf(im, spacing=10):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/metrics/reference/two_point_correlation_bf.html>`_
+    <https://porespy.org/examples/metrics/reference/two_point_correlation_bf.html>`__
     to view online example.
 
     """
     _check_for_singleton_axes(im)
     if im.ndim == 2:
-        pts = np.meshgrid(range(0, im.shape[0], spacing),
-                          range(0, im.shape[1], spacing))
-        crds = np.vstack([pts[0].flatten(),
-                          pts[1].flatten()]).T
+        pts = np.meshgrid(range(0, im.shape[0], spacing), range(0, im.shape[1], spacing))
+        crds = np.vstack([pts[0].flatten(), pts[1].flatten()]).T
     elif im.ndim == 3:
-        pts = np.meshgrid(range(0, im.shape[0], spacing),
-                          range(0, im.shape[1], spacing),
-                          range(0, im.shape[2], spacing))
-        crds = np.vstack([pts[0].flatten(),
-                          pts[1].flatten(),
-                          pts[2].flatten()]).T
+        pts = np.meshgrid(
+            range(0, im.shape[0], spacing),
+            range(0, im.shape[1], spacing),
+            range(0, im.shape[2], spacing),
+        )
+        crds = np.vstack([pts[0].flatten(), pts[1].flatten(), pts[2].flatten()]).T
     dmat = sptl.distance.cdist(XA=crds, XB=crds)
     hits = im[tuple(pts)].flatten()
     dmat = dmat[hits, :]
@@ -733,20 +967,20 @@ def _radial_profile(autocorr, bins, pf=None, voxel_size=1):
         # use np.round otherwise with odd image sizes, the mask generated can
         # be zero, resulting in Div/0 error
         inds = np.indices(autocorr.shape) - np.round(adj / 2)
-        dt = np.sqrt(inds[0]**2 + inds[1]**2)
+        dt = np.sqrt(inds[0] ** 2 + inds[1] ** 2)
     elif len(autocorr.shape) == 3:
         adj = np.reshape(autocorr.shape, [3, 1, 1, 1])
         # use np.round otherwise with odd image sizes, the mask generated can
         # be zero, resulting in Div/0 error
         inds = np.indices(autocorr.shape) - np.round(adj / 2)
-        dt = np.sqrt(inds[0]**2 + inds[1]**2 + inds[2]**2)
+        dt = np.sqrt(inds[0] ** 2 + inds[1] ** 2 + inds[2] ** 2)
     else:
-        raise Exception('Image dimensions must be 2 or 3')
+        raise Exception("Image dimensions must be 2 or 3")
     if np.max(bins) > np.max(dt):
         msg = (
-            'Bins specified distances exceeding maximum radial distance for'
-            ' image size. Radial distance cannot exceed distance from center'
-            ' of image to corner.'
+            "Bins specified distances exceeding maximum radial distance for"
+            " image size. Radial distance cannot exceed distance from center"
+            " of image to corner."
         )
         raise Exception(msg)
 
@@ -768,13 +1002,14 @@ def _radial_profile(autocorr, bins, pf=None, voxel_size=1):
     return tpcf
 
 
-@njit(parallel=False)
+@njit(parallel=False)  # pragma: no cover
 def _get_radial_sum(dt, bins, bin_size, autocorr):
-    radial_sum = np.zeros_like(bins[:-1])
+    radial_sum = np.zeros_like(bins[:-1], dtype=np.float64)
     for i, r in enumerate(bins[:-1]):
         mask = (dt <= r) * (dt > (r - bin_size[i]))
-        radial_sum[i] = np.sum(np.ravel(autocorr)[np.ravel(mask)], dtype=np.int64) \
-            / np.sum(mask)
+        radial_sum[i] = np.sum(np.ravel(autocorr)[np.ravel(mask)], dtype=np.int64) / np.sum(
+            mask, dtype=np.int64
+        )
     return radial_sum
 
 
@@ -800,24 +1035,27 @@ def two_point_correlation(im, voxel_size=1, bins=100):
     Returns
     -------
     result : tpcf
-        The two-point correlation function object, with named attributes:
+        A dataclass-like object with following named attributes:
 
-        *distance*
-            The distance between two points, equivalent to bin_centers
-        *bin_centers*
-            The center point of each bin. See distance
-        *bin_edges*
-            Locations of bin divisions, including 1 more value than
-            the number of bins
-        *bin_widths*
-            Useful for passing to the ``width`` argument of
-            ``matplotlib.pyplot.bar``
-        *probability_normalized*
-            The probability that two points of the stated separation distance
-            are within the same phase normalized to 1 at r = 0
-        *probability* or *pdf*
-            The probability that two points of the stated separation distance
-            are within the same phase scaled to the phase fraction at r = 0
+        =========================== =================================================
+        Attribute                   Description
+        =========================== =================================================
+        *distance*                  The distance between two points, equivalent to
+                                    bin_centers
+        *bin_centers*               The center point of each bin. See distance
+        *bin_edges*                 Locations of bin divisions, including 1 more
+                                    value than the number of bins
+        *bin_widths*                Useful for passing to the ``width`` argument of
+                                    ``matplotlib.pyplot.bar``
+        *probability_normalized*    The probability that two points of the stated
+                                    separation distance are within the same phase
+                                    normalized to 1 at r = 0
+        *probability*               The probability that two points of the stated
+                                    separation distance are within the same phase
+                                    scaled to the phase fraction at r = 0
+        *pdf*                       Same as probability
+        =========================== =================================================
+
 
     Notes
     -----
@@ -830,7 +1068,7 @@ def two_point_correlation(im, voxel_size=1, bins=100):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/metrics/reference/two_point_correlation.html>`_
+    <https://porespy.org/examples/metrics/reference/two_point_correlation.html>`__
     to view online example.
 
     """
@@ -907,7 +1145,7 @@ def chord_counts(im):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/reference/metrics/chord_counts.html>`_
+    <https://porespy.org/examples/reference/metrics/chord_counts.html>`__
     to view online example.
 
     """
@@ -943,7 +1181,7 @@ def phase_fraction(im, normed=True):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/metrics/reference/phase_fraction.html>`_
+    <https://porespy.org/examples/metrics/reference/phase_fraction.html>`__
     to view online example.
 
     """
@@ -952,32 +1190,12 @@ def phase_fraction(im, normed=True):
     labels = np.unique(im)
     results = {}
     for label in labels:
-        results[label] = np.sum(im == label, dtype=np.int64) * \
-            (1 / im.size if normed else 1)
+        results[label] = np.sum(im == label, dtype=np.int64) * (1 / im.size if normed else 1)
     return results
 
 
-@deprecated("This function is deprecated, use pc_curve instead")
-def pc_curve_from_ibip(*args, **kwargs):
-    r"""
-    This function is deprecated.  Use ``pc_curve`` instead.  Note that the
-    ``stepped`` argument is no longer supported since this can be done
-    directly in matplotlib with ``plt.step(...)``.
-
-    """
-    return pc_curve(*args, **kwargs)
-
-
-@deprecated("This function is deprecated, use pc_curve instead")
-def pc_curve_from_mio(*args, **kwargs):
-    r"""
-    This function is deprecated.  Use ``pc_curve`` instead.
-    """
-    return pc_curve(*args, **kwargs)
-
-
-def pc_curve(im, sizes=None, pc=None, seq=None,
-             sigma=0.072, theta=180, voxel_size=1):
+@deprecated
+def pc_curve(im, pc, seq=None):
     r"""
     Produces a Pc-Snwp curve given a map of meniscus radii or capillary
     pressures at which each voxel was invaded
@@ -987,30 +1205,14 @@ def pc_curve(im, sizes=None, pc=None, seq=None,
     im : ndarray
         The voxel image of the porous media with ``True`` values indicating
         the void space
-    sizes : ndarray, optional
-        An image containing the sphere radii at which each voxel was invaded
-        during an invasion experiment.
-    pc : ndarray, optional
+    pc : ndarray
         An image containing the capillary pressures at which each voxel was
-        invaded during an invasion experiment.
+        invaded during an invasion experiment. This image can be produced
+        using `size_to_pc` if not available.
     seq : ndarray, optional
         An image containing invasion sequence values, such as that returned
-        from the ``ibip`` function.
-    sigma : float, optional
-        The surface tension of the fluid-fluid system of interest.
-        This argument is ignored if ``pc`` are specified, otherwise it
-        is used in the Washburn equation to convert ``sizes`` to capillary
-        pc.
-    theta : float
-        The contact angle measured through the invading phase in degrees.
-        This argument is ignored if ``pc`` are specified, otherwise it
-        is used in the Washburn equation to convert ``sizes`` to capillary
-        pressures.
-    voxel_size : float
-        The voxel resolution of the image.
-        This argument is ignored if ``pc`` are specified, otherwise it
-        is used in the Washburn equation to convert ``sizes`` to capillary
-        pressures.
+        from the ``ibip`` function. The curve is generated by scanning from
+        lowest to highest values and computing the corresponding saturation.
 
     Returns
     -------
@@ -1027,88 +1229,43 @@ def pc_curve(im, sizes=None, pc=None, seq=None,
                             phase at each pressure in ``pc``
         ==================  ===================================================
 
-    Notes
-    -----
-    If ``sizes`` is provided, then the Washburn equation is used to convert
-    the radii to capillary pressures, using the given ``sigma`` and ``theta``
-    values, along with the ``voxel_size`` if the values are in voxel radii.
-    For more control over how capillary pressure model, it can be computed by
-    hand, for example:
-
-        $$ pc = \frac{-2*0.072*np.cos(np.deg2rad(180))}{sizes \cdot voxel_size} $$
-
-    then passed in as the ``pc`` argument.
-
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/metrics/reference/pc_curve.html>`_
+    <https://porespy.org/examples/metrics/reference/pc_curve.html>`__
     to view online example.
 
     """
-    tqdm = get_tqdm()
-    if seq is not None:
-        seqs = np.unique(seq)[1:]
-        x = []
-        y = []
-        with tqdm(seqs, **settings.tqdm) as pbar:
-            for n in seqs:
-                pbar.update()
-                mask = seq == n
-                if (pc is not None) and (sizes is not None):
-                    raise Exception("Only one of pc or sizes can be specified")
-                elif pc is not None:
-                    pressure = pc[mask][0]
-                elif sizes is not None:
-                    r = sizes[mask][0]*voxel_size
-                    pressure = -2*sigma*np.cos(np.deg2rad(theta))/r
-                x.append(pressure)
-                snwp = ((seq <= n)*(seq > 0) *
-                        (im == 1)).sum(dtype=np.int64)/im.sum(dtype=np.int64)
-                y.append(snwp)
-        pc_curve = Results()
-        pc_curve.pc = x
-        pc_curve.snwp = y
-    elif sizes is not None:
-        if im is None:
-            im = ~(sizes == 0)
-        sz = np.unique(sizes)[:0:-1]
-        sz = np.hstack((sz[0]*2, sz))
-        x = []
-        y = []
-        with tqdm(sz, **settings.tqdm) as pbar:
-            for n in sz:
-                pbar.update()
-                r = n*voxel_size
-                pc = -2*sigma*np.cos(np.deg2rad(theta))/r
-                x.append(pc)
-                snwp = ((sizes >= n)*(im == 1)).sum(dtype=np.int64)/im.sum(dtype=np.int64)
-                y.append(snwp)
-        pc_curve = Results()
-        pc_curve.pc = x
-        pc_curve.snwp = y
-    elif pc is not None:
-        Ps = np.unique(pc[im])
-        # Utilize the fact that -inf and +inf will be at locations 0 & -1 in Ps
-        if Ps[-1] == np.inf:
-            Ps[-1] = Ps[-2]*2
-        if Ps[0] == -np.inf:
-            Ps[0] = Ps[1] - np.abs(Ps[1]/2)
-        else:
-            # Add a point at begining to ensure curve starts a 0, if no residual
-            Ps = np.hstack((Ps[0] - np.abs(Ps[0]/2), Ps))
-        y = []
-        Vp = im.sum(dtype=np.int64)
-        temp = pc[im]
-        for p in tqdm(Ps, **settings.tqdm):
-            y.append((temp <= p).sum(dtype=np.int64)/Vp)
-        pc_curve = Results()
-        pc_curve.pc = Ps
-        pc_curve.snwp = y
+    Ps = np.unique(pc[im])
+    # Utilize the fact that -inf and +inf will be at locations 0 & -1 in Ps
+    if Ps[-1] == np.inf:
+        Ps[-1] = Ps[-2] * 2
+    if Ps[0] == -np.inf:
+        Ps[0] = Ps[1] - np.abs(Ps[1] / 2)
+    else:
+        # Add a point at begining to ensure curve starts a 0, if no residual
+        Ps = np.hstack((Ps[0] - np.abs(Ps[0] / 2), Ps))
+    y = []
+    Vp = im.sum(dtype=np.int64)
+    temp = pc[im]
+    desc = inspect.currentframe().f_code.co_name  # Get current func name
+    for p in tqdm(Ps, desc=desc, **settings.tqdm):
+        y.append((temp <= p).sum(dtype=np.int64) / Vp)
+    pc_curve = Results()
+    pc_curve.pc = Ps
+    pc_curve.snwp = np.array(y)
     return pc_curve
 
 
-def pc_map_to_pc_curve(pc, im, seq=None):
+def pc_map_to_pc_curve(
+    pc,
+    im,
+    seq=None,
+    mode="drainage",
+    pc_min=None,
+    pc_max=None,
+    fix_ends=True,
+):
     r"""
     Converts a pc map into a capillary pressure curve
 
@@ -1116,19 +1273,31 @@ def pc_map_to_pc_curve(pc, im, seq=None):
     ----------
     pc : ndarray
         A numpy array with each voxel containing the capillary pressure at which
-        it was invaded. `-inf` indicates voxels which are already filled with
-        non-wetting fluid, and `+inf` indicates voxels that are not invaded by
-        non-wetting fluid (e.g., trapped wetting phase). Solids should be
-        noted by `+inf` but this is also enforced inside the function using `im`.
+        it was invaded. `-inf` indicates voxels which are filled with non-wetting
+        fluid at all pressures, and `+inf` indicates voxels that are filled by
+        wetting fluid at all pressures. Values in the solid phase are masked by
+        `im` so are ignored.
     im : ndarray
         A numpy array with `True` values indicating the void space and `False`
         elsewhere. This is necessary to define the total void volume of the domain
-        for computing the saturation.
+        when computing the saturation.
     seq : ndarray, optional
         A numpy array with each voxel containing the sequence at which it was
-        invaded. This is required when analyzing results from invasion percolation
+        invaded. This is required when analyzing results from injection simulations
         since the pressures in `pc` do not correspond to the sequence in which
         they were filled.
+    mode : str
+        Indicates whether the invasion was a drainage or an imbibition process.
+        Options are 'drainage' and 'imbibition'.
+    fix_ends : bool (default is `True`)
+        If `True` (default) this puts values at + and - infinity corresponding to
+        maximum and minimum non-wetting phase saturations. This helps when plotting
+        as it adds plateaus.
+    pc_min, pc_max : float
+        Minimum and maximum values to clip the capillary pressures. This is useful
+        if the minimum or maximum capillary pressure values are -/+ infinity, which
+        means they do not show up when plotting.  Using `pc_min=1` and `pc_max=1e6`
+        for instance, will make plateaus render when plotting.
 
     Returns
     -------
@@ -1148,15 +1317,76 @@ def pc_map_to_pc_curve(pc, im, seq=None):
     To use this function with the results of `porosimetry` or `ibip` the sizes map
     must be converted to a capillary pressure map first.  `drainage` and `invasion`
     both return capillary pressure maps which can be passed directly as `pc`.
+
+    Examples
+    --------
+    `Click here
+    <https://porespy.org/examples/metrics/reference/pc_map_to_pc_curve.html>`_
+    to view online example.
     """
-    pc[~im] = np.inf  # Ensure solid voxels are set to inf invasion pressure
+    pc = np.copy(pc)
+
     if seq is None:
-        pcs, counts = np.unique(pc, return_counts=True)
-    else:
-        vals, index, counts = np.unique(seq, return_index=True, return_counts=True)
-        pcs = pc.flatten()[index]
-    snwp = np.cumsum(counts[pcs < np.inf])/im.sum()
-    pcs = pcs[pcs < np.inf]
+        seq = pc_to_seq(im=im, pc=pc, mode=mode)
+        # Or stand alone code
+        # if mode.startswith('dr'):
+        #     seq = np.digitize(x=pc.flatten(), bins=np.unique(pc[im]))
+        # elif mode.startswith('imb'):
+        #     seq = np.digitize(x=pc.flatten(), bins=np.flip(np.unique(pc)))
+        # seq = np.reshape(seq, im.shape)
+
+    if mode.startswith("dr"):
+        seq = seq.astype(float)
+        seq[pc == np.inf] = np.inf
+        seq[pc == -np.inf] = -np.inf
+        # This could be done with pc instead of seq, but using seq makes it work
+        # for injection as well as drainage
+        vals, index, counts = np.unique(seq[im], return_index=True, return_counts=True)
+        pcs = pc[im][index]
+        # If trapping present, don't include last counts in cumsum
+        mask = pcs < np.inf
+        snwp = np.cumsum(counts[mask]) / im.sum()
+        snwp = np.hstack((snwp, [snwp[-1]]*sum(~mask)))
+
+        if fix_ends:
+            if pcs[0] > -np.inf:  # Fix lower left side
+                pcs = np.hstack((pcs[0], pcs))
+                snwp = np.hstack((0.0, snwp))
+            if (pcs[-1] < np.inf) and (snwp[-1] < 1):
+                pcs = np.hstack((pcs, np.inf))
+                snwp = np.hstack((snwp, snwp[-1]))
+
+    elif mode.startswith("imb"):
+        seq = seq.astype(float)
+        seq[pc == np.inf] = np.inf  # Set residual pixels in seq to inf
+        seq[pc == -np.inf] = -np.inf  # Set trapped pixels in seql to -inf
+        vals, index, counts = np.unique(seq[im], return_index=True, return_counts=True)
+        pcs = pc[im][index]
+        # Move +/-inf to opposite ends of pcs, and upate counts accordingly
+        idx = np.argsort(pcs)[-1::-1]
+        pcs = pcs[idx]
+        counts = counts[idx]
+
+        mask = pcs > -np.inf
+        snwp = 1 - np.cumsum(counts[mask]) / im.sum()
+        snwp = np.hstack((snwp, [snwp[-1]]*sum(~mask)))
+        if fix_ends:
+            if pcs[0] < np.inf:
+                pcs = np.hstack((pcs[0], pcs))
+                snwp = np.hstack((1.0, snwp))
+            if (pcs[-1] > -np.inf) and (snwp[-1] > 0):
+                pcs = np.hstack((pcs, -np.inf))
+                snwp = np.hstack((snwp, snwp[-1]))
+
+    # Apply clipping to Pc values
+    if pc_min or pc_max:
+        pcs = np.clip(pcs, a_min=pc_min, a_max=pc_max)
+        if pc_min and pcs.min() > pc_min:
+            pcs = np.hstack((pc_min, pcs))
+            snwp = np.hstack((snwp[0], snwp))
+        if pc_max and pcs.min() < pc_max:
+            pcs = np.hstack((pcs, pc_max))
+            snwp = np.hstack((snwp, snwp[-1]))
 
     results = Results()
     results.pc = pcs
@@ -1164,7 +1394,7 @@ def pc_map_to_pc_curve(pc, im, seq=None):
     return results
 
 
-def satn_profile(satn, s=None, im=None, axis=0, span=10, mode='tile'):
+def satn_profile(satn, s=None, im=None, axis=0, span=10, mode="tile"):
     r"""
     Computes a saturation profile from an image of fluid invasion
 
@@ -1176,7 +1406,8 @@ def satn_profile(satn, s=None, im=None, axis=0, span=10, mode='tile'):
         void space.
     s : scalar
         The global saturation value for which the profile is desired. If `satn` is
-        a pre-thresholded boolean image then this is ignored, `im` is required.
+        a pre-thresholded boolean image then this is ignored, in which case `im`
+        is required.
     im : ndarray
         A boolean image with `True` values indicating the void phase. This is used
         to compute the void volume if `satn` is given as a pre-thresholded boolean
@@ -1184,7 +1415,7 @@ def satn_profile(satn, s=None, im=None, axis=0, span=10, mode='tile'):
     axis : int
         The axis along which to profile should be measured
     span : int
-        The number of layers to include in the moving average saturation
+        The width of layers to include in the moving average saturation
         calculation.
     mode : str
         How the moving average should be applied. Options are:
@@ -1215,41 +1446,32 @@ def satn_profile(satn, s=None, im=None, axis=0, span=10, mode='tile'):
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/metrics/reference/satn_profile.html>`_
+    <https://porespy.org/examples/metrics/reference/satn_profile.html>`__
     to view online example.
     """
     span = max(1, span)
     if s is None:
         if satn.dtype != bool:
-            msg = 'Must specify a target saturation if saturation map is provided'
+            msg = "Must specify a target saturation if saturation map is provided"
             raise Exception(msg)
         s = 2  # Will find ALL voxels, then > 0 will limit to only True ones
         satn = satn.astype(int)
         satn[satn == 0] = -1
         satn[~im] = 0
     else:
-        msg = 'The maximum saturation in the image is less than the given threshold'
+        msg = "The maximum saturation in the image is less than the given threshold"
         if satn.max() < s:
             raise Exception(msg)
 
-    satn = np.swapaxes(satn, 0, axis)
-    if mode == 'tile':
-        y = np.zeros(int(satn.shape[0]/span))
-        z = np.zeros_like(y)
-        for i in range(int(satn.shape[0]/span)):
-            void = satn[i*span:(i+1)*span, ...] != 0
-            nwp = (satn[i*span:(i+1)*span, ...] <= s) \
-                *(satn[i*span:(i+1)*span, ...] > 0)
-            y[i] = nwp.sum(dtype=np.int64)/void.sum(dtype=np.int64)
-            z[i] = i*span + (span-1)/2
-    if mode == 'slide':
-        y = np.zeros(int(satn.shape[0]-span))
-        z = np.zeros_like(y)
-        for i in range(int(satn.shape[0]-span)):
-            void = satn[i:i+span, ...] != 0
-            nwp = (satn[i:i+span, ...] <= s)*(satn[i:i+span, ...] > 0)
-            y[i] = nwp.sum(dtype=np.int64)/void.sum(dtype=np.int64)
-            z[i] = i + (span-1)/2
+    slices = get_slices_slabs(im=satn, axis=axis, span=span, mode=mode)
+    y = np.zeros(len(slices))
+    z = np.zeros_like(y)
+    for i, slab in enumerate(slices):
+        void = satn[slab] != 0
+        nwp = (satn[slab] <= s) * (satn[slab] > 0)
+        y[i] = nwp.sum(dtype=np.int64) / void.sum(dtype=np.int64)
+        z[i] = (slab[axis].start + slab[axis].stop) / 2
+
     results = Results()
     results.position = z
     results.saturation = y
@@ -1273,8 +1495,19 @@ def find_h(saturation, position=None, srange=[0.01, 0.99]):
 
     Returns
     -------
-    h : scalar
-        The height of the two-phase zone
+    A dataclass-like object with the following attributes:
+
+        =========== ================================================================
+        Attribute   Description
+        =========== ================================================================
+        `zmax`      The position where the saturation first exceeds `smax`
+        `zmin`      The position where the saturation first exceeds `smin`
+        `smax`      The value defining the start of the saturation profile
+        `smin`      The value defining the end of the saturation profile
+        `h`         The total distance in voxels between `zmax` and `zmin`
+        `valid`     A flag indicating whether the requested saturation difference
+                    (between `smin` and `smax`) was found.
+        =========== ================================================================
 
     See Also
     --------
@@ -1282,13 +1515,14 @@ def find_h(saturation, position=None, srange=[0.01, 0.99]):
 
     Notes
     -----
-    The ``satn_profile`` function can be used to obtain the ``saturation``
-    and ``position`` from an image.
+    The `satn_profile` function can be used to obtain the ``saturation``
+    and `position` from an image, such as a displacement map produced by
+    `drainage` or `imbibition`.
 
     Examples
     --------
     `Click here
-    <https://porespy.org/examples/metrics/reference/find_h.html>`_
+    <https://porespy.org/examples/metrics/reference/find_h.html>`__
     to view online example.
 
     """
@@ -1301,8 +1535,9 @@ def find_h(saturation, position=None, srange=[0.01, 0.99]):
     if (min(srange) < min(saturation)) or (max(srange) > max(saturation)):
         srange = max(min(srange), min(saturation)), min(max(srange), max(saturation))
         r.valid = False
-        logger.warning(f'The requested saturation range was adjusted to {srange}'
-                        ' to accomodate data')
+        logger.warning(
+            f"The requested saturation range was adjusted to {srange} to accomodate data"
+        )
     # Find zmax
     x = saturation >= max(srange)
     zmax = np.where(x)[0][-1]
@@ -1318,6 +1553,100 @@ def find_h(saturation, position=None, srange=[0.01, 0.99]):
     r.zmin = zmin
     r.smax = max(srange)
     r.smin = min(srange)
-    r.h = abs(zmax-zmin)
+    r.h = abs(zmax - zmin)
 
     return r
+
+
+def bond_number(
+    im: npt.NDArray,
+    delta_rho: float,
+    g: float,
+    sigma: float,
+    voxel_size: float,
+    source: str = "lt",
+    method: str = "median",
+    mask_source: bool = False,
+    use_diameter: bool = False,
+):
+    r"""
+    Computes the Bond number for an image
+
+    Parameters
+    ----------
+    im : ndarray
+        The image of the domain with `True` values indicating the phase of interest
+    delta_rho : float
+        The difference in the density of the non-wetting and wetting phase
+    g : float
+        The gravitational constant for the system
+    sigma : float
+        The surface tension of the fluid pair
+    voxel_size : float
+        The size of the voxels
+    source : str
+        The source of the pore size values to use when computing the characteristic
+        length *R*. Options are:
+
+        ============== =============================================================
+        Option         Description
+        ============== =============================================================
+        dt             Uses the distance transform
+        lt             Uses the local thickness
+        ============== =============================================================
+
+    method : str
+        The method to use for finding the characteristic length *R* from the
+        values in `source`. Options are:
+
+        ============== =============================================================
+        Option         Description
+        ============== =============================================================
+        mean           The arithmetic mean (using `numpy.mean`)
+        min (or amin)  The minimum value (using `numpy.amin`)
+        max (or amax)  The maximum value (using `numpy.amax`)
+        mode           The mode of the values (using `scipy.stats.mode`)
+        gmean          The geometric mean of the values (using `scipy.stats.gmean`)
+        hmean          The harmonic mean of the values (using `scipy.stats.hmean`)
+        pmean          The power mean of the values (using `scipy.stats.pmean`)
+        ============== =============================================================
+
+    mask_source : bool (default is `False`)
+        If `True` then the distance values in `source` are masked by the skeleton
+        before computing the average value using the specified `method`. This
+        requires computing the skeleton which can take a few moments.
+    use_diameter : bool (default is `False`)
+        If `True` then the characteristic size obtaine from `source` is multiplied by
+        2 to convert radius to diameter.
+
+    Examples
+    --------
+    `Click here
+    <https://porespy.org/examples/metrics/reference/bond_number.html>`_
+    to view online example.
+    """
+    if mask_source is True:
+        mask = skeletonize(im)
+    else:
+        mask = im
+
+    if source == "dt":
+        dvals = edt(im)
+    elif source == "lt":
+        dvals = local_thickness(im)
+    else:
+        raise Exception(f"Unrecognized source {source}")
+
+    if method in ["median", "mean", "amin", "amax"]:
+        f = getattr(np, method)
+    elif method in ["min", "max"]:
+        f = getattr(np, "a" + method)
+    elif method in ["pmean", "hmean", "gmean", "mode"]:
+        f = getattr(spst, method)
+    else:
+        raise Exception(f"Unrecognized method {method}")
+    R = f(dvals[mask])
+    if use_diameter:
+        R = 2 * R
+    Bo = abs(delta_rho * g * (R * voxel_size) ** 2 / sigma)
+    return Bo

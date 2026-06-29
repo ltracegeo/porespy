@@ -1,10 +1,10 @@
 import os
 import sys
-import numpy as np
-from numpy.testing import assert_allclose
-import porespy as ps
-import openpnm as op
 from pathlib import Path
+
+import numpy as np
+
+import porespy as ps
 
 
 class ExportTest():
@@ -15,7 +15,8 @@ class ExportTest():
     def test_export_to_palabos(self):
         X = Y = Z = 20
         S = X * Y * Z
-        im = ps.generators.blobs(shape=[X, Y, Z], porosity=0.7, blobiness=1)
+        im = ps.generators.blobs(
+            shape=[X, Y, Z], porosity=0.7, blobiness=1, periodic=False,)
         tmp = os.path.join(self.path, 'palabos.dat')
         ps.io.to_palabos(im, tmp, solid=0)
         assert os.path.isfile(tmp)
@@ -27,19 +28,19 @@ class ExportTest():
         os.remove(tmp)
 
     def test_to_vtk_2d(self):
-        im = ps.generators.blobs(shape=[20, 20])
+        im = ps.generators.blobs(shape=[20, 20], periodic=False,)
         ps.io.to_vtk(im, filename='vtk_func_test')
         assert os.stat('vtk_func_test.vti').st_size == 831
         os.remove('vtk_func_test.vti')
 
     def test_to_vtk_3d(self):
-        im = ps.generators.blobs(shape=[20, 20, 20])
+        im = ps.generators.blobs(shape=[20, 20, 20], periodic=False,)
         ps.io.to_vtk(im, filename='vtk_func_test')
         assert os.stat('vtk_func_test.vti').st_size == 8433
         os.remove('vtk_func_test.vti')
 
     def test_dict_to_vtk(self):
-        im = ps.generators.blobs(shape=[20, 20, 20])
+        im = ps.generators.blobs(shape=[20, 20, 20], periodic=False,)
         ps.io.dict_to_vtk({'im': im}, filename="dictvtk")
         a = os.stat('dictvtk.vti').st_size
         os.remove('dictvtk.vti')
@@ -49,24 +50,9 @@ class ExportTest():
         os.remove('dictvtk.vti')
 
     def test_to_stl(self):
-        im = ps.generators.blobs(shape=[50, 50, 50])
+        im = ps.generators.blobs(shape=[50, 50, 50], periodic=False,)
         ps.io.to_stl(im, filename="im2stl")
         os.remove("im2stl.stl")
-
-    def test_spheres_to_comsol_radii_centers(self):
-        radii = np.array([10, 20, 25, 5])
-        centers = np.array([[0, 10, 3],
-                            [20, 20, 13],
-                            [40, 25, 55],
-                            [60, 0, 89]])
-        ps.io.spheres_to_comsol(filename='sphere_pack', centers=centers, radii=radii)
-        os.remove("sphere_pack.mphtxt")
-
-    def test_spheres_to_comsol_im(self):
-        im = ps.generators.overlapping_spheres(shape=[100, 100, 100],
-                                               r=10, porosity=0.6)
-        ps.io.spheres_to_comsol(filename='sphere_pack', im=im)
-        os.remove("sphere_pack.mphtxt")
 
     def test_zip_to_stack_and_folder_to_stack(self):
         p = Path(os.path.realpath(__file__),

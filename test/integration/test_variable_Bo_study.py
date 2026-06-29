@@ -1,13 +1,12 @@
-import pytest
-import numpy as np
-import porespy as ps
 import matplotlib.pyplot as plt
+import numpy as np
+import pytest
+
+import porespy as ps
 
 
 @pytest.mark.skip(reason="Passes locally, fails on GitHub!")
-def test_variable_Bo_study():
-    np.random.seed(2)
-
+def test_variable_Bo_study(plot=False):
     # Input domain and fluid properties
     vx = 5e-5
     L = int(0.02/vx)
@@ -17,10 +16,9 @@ def test_variable_Bo_study():
     delta_rho = -1205  # Negative since air is displacing water
     sigma = 0.064
     a = 0.001  # Average pore size, seems to be plate spacing in Ayaz paper
-    plot = False
 
     # Generate image
-    im = ps.generators.random_spheres(shape=[L, W], r=int(D/2), clearance=2, phi=0.25, seed=2)
+    im = ~ps.generators.random_spheres(shape=[L, W], r=int(D/2), clearance=2, phi=0.25, seed=2)
     inlets = np.zeros_like(im)
     inlets[-1, ...] = True
 
@@ -29,16 +27,30 @@ def test_variable_Bo_study():
     sim1 = {}  # Collect results in a dict with each Bo as the key
     for i, alpha in enumerate(angles):
         g = 9.81*np.sin(np.deg2rad(alpha))  # Compute g include angle of domain
-        Bo = np.abs(delta_rho*g*(a**2)/sigma)  # Compute Bo number for comparison
+        pc = ps.filters.capillary_transform(
+            im=im,
+            sigma=sigma,
+            theta=180,
+            g=g,
+            rho_wp=0,
+            rho_nwp=delta_rho,
+            voxel_size=vx,
+        )
+        Bo = ps.metrics.bond_number(
+            im=im,
+            delta_rho=delta_rho,
+            g=g,
+            sigma=sigma,
+            voxel_size=vx,
+        )
         print(f"Peforming drainage without trapping at Bo: {np.around(Bo, 3)}")
-        sim1[alpha] = ps.simulations.drainage(im=im,
-                                              voxel_size=vx,
-                                              inlets=inlets,
-                                              outlets=None,  # Trapping is ignore
-                                              sigma=sigma,
-                                              delta_rho=delta_rho,
-                                              g=g,
-                                              bins=25)
+        sim1[alpha] = ps.simulations.drainage(
+            im=im,
+            pc=pc,
+            inlets=inlets,
+            outlets=None,  # Trapping is ignored
+            steps=25,
+        )
 
     # %%  Repeat with trapping
     outlets = np.zeros_like(im)
@@ -46,24 +58,32 @@ def test_variable_Bo_study():
     sim2 = {}
     for i, alpha in enumerate(angles):
         g = 9.81*np.sin(np.deg2rad(alpha))  # Compute g include angle of domain
+        pc = ps.filters.capillary_transform(
+            im=im,
+            sigma=sigma,
+            theta=180,
+            g=g,
+            rho_wp=0,
+            rho_nwp=delta_rho,
+            voxel_size=vx,
+        )
         Bo = np.abs(delta_rho*g*(a**2)/sigma)  # Compute Bo number for comparison
         print(f"Peforming drainage with trapping at Bo: {np.around(Bo, 3)}")
-        sim2[alpha] = ps.simulations.drainage(im=im,
-                                              voxel_size=vx,
-                                              inlets=inlets,
-                                              outlets=outlets,
-                                              sigma=sigma,
-                                              delta_rho=delta_rho,
-                                              g=g,
-                                              bins=25)
+        sim2[alpha] = ps.simulations.drainage(
+            im=im,
+            pc=pc,
+            inlets=inlets,
+            outlets=outlets,
+            steps=25,
+        )
 
     # %%  Plot pseudo capillary pressure curves for each angle/Bo
     if plot:
         c = ['tab:blue', 'tab:orange', 'tab:olive', 'tab:purple', 'tab:green']
         for i, angle in enumerate(angles):
-            plt.plot(sim1[angle].snwp, sim1[angle].pc, '-o', color=c[i])
-            plt.ylim([-1500, 1500])
-            plt.xlim([0, 1])
+            plt.plot(sim1[angle].pc, sim1[angle].snwp, '-o', color=c[i])
+            plt.xlim([-1500, 1500])
+            plt.ylim([0, 1])
 
     # %%  Plot saturation map for a given angle
     if plot:
@@ -73,7 +93,7 @@ def test_variable_Bo_study():
         cmap.set_under(color='red')
         cmap.set_over(color='black')
         fig, ax = plt.subplots(1, 1)
-        temp = sim1[angle].im_satn
+        temp = sim1[angle].im_snwp
         vmin = np.amin(temp)
         vmax = np.amax(temp)
         temp[temp == 0] = vmin - 1
@@ -87,8 +107,12 @@ def test_variable_Bo_study():
     if plot:
         s = 0.09
         angle = 30
-        satn = sim1[angle].im_satn
+        satn = sim1[angle].im_snwp
         fig, ax = plt.subplots(1, 1)
         temp = (satn < s)*(satn > 0)
         ax.imshow(~temp, cmap=plt.cm.bone, origin='lower')
         ax.axis('off')
+
+# %%
+if __name__ == "__main__":
+    test_variable_Bo_study(plot=False)

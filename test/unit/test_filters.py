@@ -1,16 +1,12 @@
-import pytest
 import numpy as np
-import porespy as ps
+import pytest
 import scipy.ndimage as spim
-from skimage.morphology import disk, ball, skeletonize_3d
+from skimage.morphology import ball, disk, skeletonize
 from skimage.util import random_noise
-from scipy.stats import norm
-try:
-    from pyedt import edt
-except ModuleNotFoundError:
-    from edt import edt
 
+import porespy as ps
 
+edt = ps.tools.get_edt()
 ps.settings.tqdm['disable'] = True
 
 
@@ -19,7 +15,8 @@ class FilterTest():
         self.im = ps.generators.blobs(shape=[100, 100, 100],
                                       blobiness=2,
                                       seed=0,
-                                      porosity=0.499829)
+                                      porosity=0.499829,
+                                      periodic=False,)
         # Ensure that im was generated as expected
         assert self.im.sum()/self.im.size == 0.499829
         self.im_dt = edt(self.im)
@@ -27,40 +24,38 @@ class FilterTest():
     def test_im_in_not_im_out(self):
         im = self.im[:, :, 50]
         for item in ps.filters.__dir__():
-            if ~item.startswith('__'):
+            if not item.startswith('__'):
                 temp = getattr(ps.filters, item)
                 assert temp is not im
 
     def test_porosimetry_compare_modes_2d(self):
         im = self.im[:, :, 50]
         sizes = np.arange(25, 1, -1)
-        fft = ps.filters.porosimetry(im, mode='hybrid', sizes=sizes)
-        mio = ps.filters.porosimetry(im, mode='mio', sizes=sizes)
-        dt = ps.filters.porosimetry(im, mode='dt', sizes=sizes)
+        fft = ps.filters.porosimetry(im, method='conv', sizes=sizes)
+        dsi = ps.filters.porosimetry(im, method='dsi', sizes=sizes)
+        dt = ps.filters.porosimetry(im, method='dt', sizes=sizes)
         assert np.all(fft == dt)
-        assert np.all(fft == mio)
+        assert np.all(fft == dsi)
 
     def test_porosimetry_num_points(self):
-        mip = ps.filters.porosimetry(im=self.im, sizes=10)
+        mip = ps.filters.porosimetry(im=self.im, sizes=None)
         steps = np.unique(mip)
-        ans = np.array([0.00000000, 1.00000000, 1.37871571, 1.61887041,
-                        1.90085700, 2.23196205, 2.62074139, 3.07724114,
-                        3.61325732])
+        ans = np.array([0., 1., 2., 3., 4,])
         assert np.allclose(steps, ans)
 
     def test_porosimetry_compare_modes_3d(self):
         im = self.im
         sizes = np.arange(25, 1, -1)
-        fft = ps.filters.porosimetry(im, sizes=sizes, mode='hybrid')
-        mio = ps.filters.porosimetry(im, sizes=sizes, mode='mio')
-        dt = ps.filters.porosimetry(im, sizes=sizes, mode='dt')
+        fft = ps.filters.porosimetry(im, sizes=sizes, method='conv')
+        dsi = ps.filters.porosimetry(im, sizes=sizes, method='dsi')
+        dt = ps.filters.porosimetry(im, sizes=sizes, method='dt')
         assert np.all(fft == dt)
-        assert np.all(fft == mio)
+        assert np.all(fft == dsi)
 
     def test_porosimetry_with_sizes(self):
         s = np.logspace(0.01, 0.6, 5)
         mip = ps.filters.porosimetry(im=self.im, sizes=s)
-        assert np.allclose(np.unique(mip)[1:], s)
+        assert np.all(np.isin(np.unique(mip)[1:], s))
 
     def test_apply_chords_axis0(self):
         c = ps.filters.apply_chords(im=self.im, spacing=3, axis=0)
@@ -112,52 +107,59 @@ class FilterTest():
         assert np.all(np.unique(sz) == [0, 2])
 
     def test_find_disconnected_voxels_2d(self):
-        h = ps.filters.find_disconnected_voxels(self.im[:, :, 0])
+        h = ps.filters.find_disconnected_voxels(self.im[:, :, 0], conn='max')
         assert np.sum(h) == 477
 
     def test_find_disconnected_voxels_2d_conn4(self):
-        h = ps.filters.find_disconnected_voxels(self.im[:, :, 0], conn=4)
+        h = ps.filters.find_disconnected_voxels(self.im[:, :, 0], conn='min')
         assert np.sum(h) == 652
 
     def test_find_disconnected_voxels_3d(self):
-        h = ps.filters.find_disconnected_voxels(self.im)
+        h = ps.filters.find_disconnected_voxels(self.im, conn='max')
         assert np.sum(h) == 55
 
     def test_find_disconnected_voxels_3d_conn6(self):
-        h = ps.filters.find_disconnected_voxels(self.im, conn=6)
+        h = ps.filters.find_disconnected_voxels(self.im, conn='min')
         assert np.sum(h) == 202
 
     def test_trim_nonpercolating_paths_2d_axis0(self):
         np.random.seed(0)
-        im = ps.generators.blobs(shape=[200, 200], porosity=0.55875, blobiness=2)
+        im = ps.generators.blobs(
+            shape=[200, 200], porosity=0.55875, blobiness=2, periodic=False,)
         assert im.sum()/im.size == 0.55875
         inlets = np.zeros_like(im)
         inlets[0, :] = 1
         outlets = np.zeros_like(im)
         outlets[-1, :] = 1
         assert spim.label(im)[1] > 1
-        h = ps.filters.trim_nonpercolating_paths(im=im,
-                                                 inlets=inlets,
-                                                 outlets=outlets)
+        h = ps.filters.trim_nonpercolating_paths(
+            im=im, inlets=inlets, outlets=outlets)
         assert spim.label(h)[1] == 1
+        h2 = ps.filters.trim_nonpercolating_paths(
+            im=im, axis=0)
+        assert np.all(h == h2)
 
     def test_trim_nonpercolating_paths_2d_axis1(self):
         np.random.seed(0)
-        im = ps.generators.blobs(shape=[200, 200], porosity=0.55875, blobiness=2)
+        im = ps.generators.blobs(
+            shape=[200, 200], porosity=0.55875, blobiness=2, periodic=False,)
         assert im.sum()/im.size == 0.55875
         inlets = np.zeros_like(im)
         inlets[:, 0] = 1
         outlets = np.zeros_like(im)
         outlets[:, -1] = 1
         assert spim.label(im)[1] > 1
-        h = ps.filters.trim_nonpercolating_paths(im=im,
-                                                 inlets=inlets,
-                                                 outlets=outlets)
+        h = ps.filters.trim_nonpercolating_paths(
+            im=im, inlets=inlets, outlets=outlets)
         assert spim.label(h)[1] == 1
+        h2 = ps.filters.trim_nonpercolating_paths(
+            im=im, axis=1)
+        assert np.all(h == h2)
 
     def test_trim_nonpercolating_paths_no_paths(self):
         np.random.seed(0)
-        im = ps.generators.blobs([200, 200], porosity=0.2535, blobiness=2)
+        im = ps.generators.blobs(
+            shape=[200, 200], porosity=0.2535, blobiness=2, periodic=False,)
         assert im.sum()/im.size == 0.2535
         inlets = np.zeros_like(im)
         inlets[:, 0] = 1
@@ -171,7 +173,8 @@ class FilterTest():
 
     def test_trim_nonpercolating_paths_3d_axis2(self):
         np.random.seed(0)
-        im = ps.generators.blobs([100, 100, 100], porosity=0.550191, blobiness=2)
+        im = ps.generators.blobs(
+            shape=[100, 100, 100], porosity=0.550191, blobiness=2, periodic=False,)
         assert im.sum()/im.size == 0.550191
         inlets = np.zeros_like(im)
         inlets[..., 0] = 1
@@ -182,10 +185,14 @@ class FilterTest():
                                                  inlets=inlets,
                                                  outlets=outlets)
         assert spim.label(h)[1] == 1
+        h2 = ps.filters.trim_nonpercolating_paths(
+            im=im, axis=2)
+        assert np.all(h == h2)
 
     def test_trim_nonpercolating_paths_3d_axis1(self):
         np.random.seed(0)
-        im = ps.generators.blobs([100, 100, 100], porosity=0.550191, blobiness=2)
+        im = ps.generators.blobs(
+            shape=[100, 100, 100], porosity=0.550191, blobiness=2, periodic=False,)
         assert im.sum()/im.size == 0.550191
         inlets = np.zeros_like(im)
         inlets[:, 0, :] = 1
@@ -196,10 +203,14 @@ class FilterTest():
                                                  inlets=inlets,
                                                  outlets=outlets)
         assert spim.label(h)[1] == 1
+        h2 = ps.filters.trim_nonpercolating_paths(
+            im=im, axis=1)
+        assert np.all(h == h2)
 
     def test_trim_nonpercolating_paths_3d_axis0(self):
         np.random.seed(0)
-        im = ps.generators.blobs([100, 100, 100], porosity=0.550191, blobiness=2)
+        im = ps.generators.blobs(
+            shape=[100, 100, 100], porosity=0.550191, blobiness=2, periodic=False,)
         assert im.sum()/im.size == 0.550191
         inlets = np.zeros_like(im)
         inlets[0, ...] = 1
@@ -210,47 +221,42 @@ class FilterTest():
                                                  inlets=inlets,
                                                  outlets=outlets)
         assert spim.label(h)[1] == 1
+        h2 = ps.filters.trim_nonpercolating_paths(
+            im=im, axis=0)
+        assert np.all(h == h2)
 
-    def test_trim_disconnected_blobs(self):
-        s = disk(1)
+    def test_trim_disconnected_voxels(self):
         np.random.seed(0)
-        im = ps.generators.blobs([200, 200], porosity=0.55875, blobiness=2)
+        im = ps.generators.blobs(
+            shape=[200, 200], porosity=0.55875, blobiness=2, periodic=False,)
         assert im.sum()/im.size == 0.55875
         inlets = np.zeros_like(im)
         inlets[0, ...] = 1
         n1 = spim.label(im)[1]
-        h = ps.filters.trim_disconnected_blobs(im=im, inlets=inlets, strel=s)
+        h = ps.filters.trim_disconnected_voxels(im=im, inlets=inlets, conn='min')
         n2 = spim.label(h)[1]
         assert n1 > n2
         assert spim.label(h + inlets)[1] == 1
 
-    def test_fill_blind_pores(self):
+    def test_fill_closed_pores(self):
         h = ps.filters.find_disconnected_voxels(self.im)
-        b = ps.filters.fill_blind_pores(h)
+        b = ps.filters.fill_closed_pores(h)
         h = ps.filters.find_disconnected_voxels(b)
         assert np.sum(h) == 0
 
-    def test_fill_blind_pores_w_surface(self):
-        im = ~ps.generators.lattice_spheres(shape=[101, 101], r=5,
-                                            offset=0, spacing=20)
-        im2 = ps.filters.fill_blind_pores(im, surface=False)
-        assert im2.sum() > 0
-        im3 = ps.filters.fill_blind_pores(im, surface=True)
-        assert im3.sum() == 0
-
-    def test_fill_blind_pores_surface_blobs_2D(self):
-        im = ps.generators.blobs([100, 100], porosity=0.6021, seed=0)
+    def test_fill_closed_pores_surface_blobs_2D(self):
+        im = ps.generators.blobs(
+            shape=[100, 100], porosity=0.6021, seed=0, periodic=False,)
         assert im.sum()/im.size == 0.6021
-        im2 = ps.filters.fill_blind_pores(im)
+        im2 = ps.filters.fill_closed_pores(im)
         assert im.sum() == 6021
         assert im2.sum() < im.sum()
-        im3 = ps.filters.fill_blind_pores(im, surface=True)
-        assert im3.sum() < im2.sum()
 
-    def test_fill_blind_pores_surface_blobs_3D(self):
-        im = ps.generators.blobs([100, 100, 100], porosity=0.497569, seed=0)
+    def test_fill_invalid_pores_surface_blobs_3D(self):
+        im = ps.generators.blobs(
+            shape=[100, 100, 100], porosity=0.497569, seed=0, periodic=False,)
         assert im.sum()/im.size == 0.497569
-        im2 = ps.filters.fill_blind_pores(im, surface=True)
+        im2 = ps.filters.fill_invalid_pores(im)
         labels, N = spim.label(im2, ps.tools.ps_rect(3, ndim=3))
         assert N == 1
 
@@ -261,9 +267,9 @@ class FilterTest():
     def test_trim_floating_solid_w_surface(self):
         im = ps.generators.lattice_spheres(shape=[101, 101], r=5,
                                            offset=0, spacing=20)
-        im2 = ps.filters.trim_floating_solid(im, surface=False)
+        im2 = ps.filters.trim_floating_solid(im, incl_surface=False)
         assert im2.sum() < im.size
-        im3 = ps.filters.trim_floating_solid(im, surface=True)
+        im3 = ps.filters.trim_floating_solid(im, incl_surface=True)
         assert im3.sum() == im.size
 
     def test_trim_extrema_min(self):
@@ -281,11 +287,11 @@ class FilterTest():
         assert max1 > max2
 
     def test_local_thickness(self):
-        lt = ps.filters.local_thickness(self.im, mode='dt')
+        lt = ps.filters.local_thickness(self.im, method='dt')
         np.testing.assert_almost_equal(lt.max(), self.im_dt.max(), decimal=6)
-        lt = ps.filters.local_thickness(self.im, mode='mio')
+        lt = ps.filters.local_thickness(self.im, method='imj')
         np.testing.assert_almost_equal(lt.max(), self.im_dt.max(), decimal=6)
-        lt = ps.filters.local_thickness(self.im, mode='hybrid')
+        lt = ps.filters.local_thickness(self.im, method='conv')
         np.testing.assert_almost_equal(lt.max(), self.im_dt.max(), decimal=6)
 
     def test_local_thickness_known_sizes(self):
@@ -294,15 +300,6 @@ class FilterTest():
         im = ps.generators.random_spheres(im=im, r=10)
         lt = ps.filters.local_thickness(im, sizes=[20, 10])
         assert np.all(np.unique(lt) == [0, 10, 20])
-
-    def test_porosimetry(self):
-        im2d = self.im[:, :, 50]
-        lt = ps.filters.local_thickness(im2d)
-        sizes = np.unique(lt)
-        mip = ps.filters.porosimetry(im2d,
-                                     sizes=len(sizes),
-                                     access_limited=False)
-        assert mip.max() <= sizes.max()
 
     def test_morphology_fft_dilate_2d(self):
         im = self.im[:, :, 50]
@@ -352,6 +349,74 @@ class FilterTest():
         test = ps.filters.fftmorphology(im, strel=ball(3), mode='closing')
         assert np.all(truth == test)
 
+    def test_erode_2D_smooth(self):
+        im = ps.generators.blobs([100, 100], porosity=0.5, seed=0)
+        r = 5
+        smooth = True
+        se = ps.tools.ps_round(r=r, ndim=im.ndim, smooth=smooth)
+        truth = spim.binary_erosion(im, structure=se, border_value=1)
+        test = ps.filters.erode(im=im, r=r, method='conv', smooth=smooth)
+        assert np.all(truth == test)
+
+    def test_erode_2D_not_smooth(self):
+        im = ps.generators.blobs([100, 100], porosity=0.5, seed=0)
+        r = 5
+        smooth = False
+        se = ps.tools.ps_round(r=r, ndim=im.ndim, smooth=smooth)
+        truth = spim.binary_erosion(im, structure=se, border_value=1)
+        test = ps.filters.erode(im=im, r=r, method='conv', smooth=smooth)
+        assert np.all(truth == test)
+
+    def test_erode_2D_smooth_dt_vs_conv(self):
+        im = ps.generators.blobs([100, 100], porosity=0.5, seed=0)
+        r = 5
+        smooth = True
+        test1 = ps.filters.erode(im=im, r=r, method='conv', smooth=smooth)
+        test2 = ps.filters.erode(im=im, r=r, method='dt', smooth=smooth)
+        assert np.all(test1 == test2)
+
+    def test_erode_2D_not_smooth_dt_vs_conv(self):
+        im = ps.generators.blobs([100, 100], porosity=0.5, seed=0)
+        r = 5
+        smooth = False
+        test1 = ps.filters.erode(im=im, r=r, method='conv', smooth=smooth)
+        test2 = ps.filters.erode(im=im, r=r, method='dt', smooth=smooth)
+        assert np.all(test1 == test2)
+
+    def test_dilate_2D_smooth(self):
+        im = ps.generators.blobs([100, 100], porosity=0.5, seed=0)
+        r = 5
+        smooth = True
+        se = ps.tools.ps_round(r=r, ndim=im.ndim, smooth=smooth)
+        truth = spim.binary_dilation(im, structure=se)
+        test = ps.filters.dilate(im=im, r=r, method='conv', smooth=smooth)
+        assert np.all(truth == test)
+
+    def test_dilate_2D_not_smooth(self):
+        im = ps.generators.blobs([100, 100], porosity=0.5, seed=0)
+        r = 5
+        smooth = False
+        se = ps.tools.ps_round(r=r, ndim=im.ndim, smooth=smooth)
+        truth = spim.binary_dilation(im, structure=se)
+        test = ps.filters.dilate(im=im, r=r, method='conv', smooth=smooth)
+        assert np.all(truth == test)
+
+    def test_dilate_2D_smooth_dt_vs_conv(self):
+        im = ps.generators.blobs([100, 100], porosity=0.5, seed=0)
+        r = 5
+        smooth = True
+        test1 = ps.filters.dilate(im=im, r=r, method='conv', smooth=smooth)
+        test2 = ps.filters.dilate(im=im, r=r, method='dt', smooth=smooth)
+        assert np.all(test1 == test2)
+
+    def test_dilate_2D_not_smooth_dt_vs_conv(self):
+        im = ps.generators.blobs([100, 100], porosity=0.5, seed=0)
+        r = 5
+        smooth = False
+        test1 = ps.filters.dilate(im=im, r=r, method='conv', smooth=smooth)
+        test2 = ps.filters.dilate(im=im, r=r, method='dt', smooth=smooth)
+        assert np.all(test1 == test2)
+
     def test_reduce_peaks(self):
         im = ~ps.generators.lattice_spheres(shape=[50, 50], r=5, offset=3)
         peaks = ps.filters.reduce_peaks(im)
@@ -366,7 +431,7 @@ class FilterTest():
         for i in range(6):
             im[int(10*2*i):int(10*(2*i+1)), :] += 2
             im[:, int(10*2*i):int(10*(2*i+1))] += 4
-        borders = ps.filters.nphase_border(im, include_diagonals=False)
+        borders = ps.filters.nphase_border(im, conn="min")
         nb, counts = np.unique(borders, return_counts=True)
         assert nb.tolist() == [1.0, 2.0, 3.0]
         assert counts.tolist() == [8100, 3600, 400]
@@ -376,7 +441,7 @@ class FilterTest():
         for i in range(6):
             im[int(10*2*i):int(10*(2*i+1)), :] += 2
             im[:, int(10*2*i):int(10*(2*i+1))] += 4
-        borders = ps.filters.nphase_border(im, include_diagonals=True)
+        borders = ps.filters.nphase_border(im, conn='max')
         nb, counts = np.unique(borders, return_counts=True)
         assert nb.tolist() == [1.0, 2.0, 4.0]
         assert counts.tolist() == [8100, 3600, 400]
@@ -387,7 +452,7 @@ class FilterTest():
             im3d[int(10*2*i):int(10*(2*i+1)), :, :] += 2
             im3d[:, int(10*2*i):int(10*(2*i+1)), :] += 4
             im3d[:, :, int(10*2*i):int(10*(2*i+1))] += 8
-        borders = ps.filters.nphase_border(im3d, include_diagonals=False)
+        borders = ps.filters.nphase_border(im3d, conn="min")
         nb, counts = np.unique(borders, return_counts=True)
         assert nb.tolist() == [1.0, 2.0, 3.0, 4.0]
         assert counts.tolist() == [729000, 486000, 108000, 8000]
@@ -398,7 +463,7 @@ class FilterTest():
             im3d[int(10*2*i):int(10*(2*i+1)), :, :] += 2
             im3d[:, int(10*2*i):int(10*(2*i+1)), :] += 4
             im3d[:, :, int(10*2*i):int(10*(2*i+1))] += 8
-        borders = ps.filters.nphase_border(im3d, include_diagonals=True)
+        borders = ps.filters.nphase_border(im3d, conn='max')
         nb, counts = np.unique(borders, return_counts=True)
         assert nb.tolist() == [1.0, 2.0, 4.0, 8.0]
         assert counts.tolist() == [729000, 486000, 108000, 8000]
@@ -411,7 +476,8 @@ class FilterTest():
         assert np.all(dt[inds] - ar[inds] == 1)
 
     def test_snow_partitioning_n_2D(self):
-        im = ps.generators.blobs([500, 500], porosity=0.494604, blobiness=1, seed=0)
+        im = ps.generators.blobs(
+            shape=[500, 500], porosity=0.494604, blobiness=1, seed=0, periodic=False)
         assert im.sum()/im.size == 0.494604
         snow = ps.filters.snow_partitioning_n(im + 1, r_max=4, sigma=0.4)
         assert np.amax(snow.regions) == 136
@@ -423,7 +489,8 @@ class FilterTest():
         im = ps.generators.blobs(shape=[100, 100, 100],
                                  porosity=0.495157,
                                  blobiness=0.75,
-                                 seed=0)
+                                 seed=0,
+                                 periodic=False,)
         assert im.sum()/im.size == 0.495157
         snow = ps.filters.snow_partitioning_n(im + 1, r_max=4, sigma=0.4)
         assert np.amax(snow.regions) == 620
@@ -436,9 +503,9 @@ class FilterTest():
         im = ps.generators.overlapping_spheres(shape=[1000, 1000],
                                                r=10,
                                                porosity=0.5)
+        parallel_kw = {"divs": [2, 2], "cores": None, "overlap": None}
         snow = ps.filters.snow_partitioning_parallel(im,
-                                                     divs=[2, 2],
-                                                     cores=None,
+                                                     parallel_kw=parallel_kw,
                                                      r_max=5,
                                                      sigma=0.4)
         # assert np.amax(snow.regions) == 919
@@ -451,8 +518,9 @@ class FilterTest():
         im = disk(50)
         f = ps.filters.fftmorphology
         s = disk(1)
-        a = ps.filters.chunked_func(func=f, im=im, overlap=3, im_arg='im',
-                                    strel=s, mode='erosion')
+        parallel_kw = {"divs": 2, "overlap": 3, "cores": None}
+        a = ps.filters.chunked_func(func=f, im=im, parallel_kw=parallel_kw,
+                                    im_arg='im', strel=s, mode='erosion')
         b = ps.filters.fftmorphology(im, strel=s, mode='erosion')
         assert np.all(a == b)
 
@@ -461,8 +529,10 @@ class FilterTest():
         im = ball(50)
         f = ps.filters.fftmorphology
         s = ball(1)
-        a = ps.filters.chunked_func(func=f, im=im, im_arg='im', overlap=3,
-                                    strel=s, mode='erosion')
+        parallel_kw = {"divs": 2, "overlap": 3, "cores": None}
+        a = ps.filters.chunked_func(func=f, im=im, im_arg='im',
+                                    parallel_kw=parallel_kw, strel=s,
+                                    mode='erosion')
         b = ps.filters.fftmorphology(im, strel=s, mode='erosion')
         assert np.all(a == b)
 
@@ -478,47 +548,55 @@ class FilterTest():
 
     def test_chunked_func_w_ill_defined_filter(self):
         import scipy.signal as spsg
-        im = ps.generators.blobs(shape=[100, 100, 100], porosity=0.497569, seed=0)
+        im = ps.generators.blobs(
+            shape=[100, 100, 100], porosity=0.497569, seed=0, periodic=False,)
         assert im.sum()/im.size == 0.497569
         with pytest.raises(IndexError):
+            parallel_kw = {"divs": 2, "overlap": 5, "cores": None}
             ps.filters.chunked_func(func=spsg.convolve,
                                     in1=im*1.0,
                                     in2=ps.tools.ps_ball(5),
                                     im_arg='in1', strel_arg='in2',
-                                    overlap=5)
+                                    parallel_kw=parallel_kw)
 
     def test_prune_branches(self):
-        im = ps.generators.lattice_spheres(shape=[100, 100, 100], r=4)
-        skel1 = skeletonize_3d(im)
+        im = ps.generators.random_spheres([100, 100, 100], r=4, seed=0)
+        skel1 = skeletonize(im)
         skel2 = ps.filters.prune_branches(skel1)
         # TODO: This is failing on github
         # assert skel1.sum() > skel2.sum()
 
     def test_prune_branches_n2(self):
-        im = ps.generators.lattice_spheres(shape=[100, 100, 100], r=4)
-        skel1 = skeletonize_3d(im)
+        im = ps.generators.random_spheres(shape=[100, 100, 100], r=4, seed=0)
+        skel1 = skeletonize(im)
         skel2 = ps.filters.prune_branches(skel1, iterations=1)
         skel3 = ps.filters.prune_branches(skel1, iterations=2)
-        # TODO: These are failing on github
-        # assert skel1.sum() > skel2.sum()
-        # assert skel2.sum() == skel3.sum()
+        assert skel1.sum() > skel2.sum()
+        assert skel2.sum() > skel3.sum()
+        skel4 = ps.filters.prune_branches(skel1, iterations=3)
+        assert skel3.sum() > skel4.sum()
 
     def test_apply_padded(self):
-        im = ps.generators.blobs(shape=[100, 100], porosity=0.5051, seed=0)
-        assert im.sum()/im.size == 0.5051
-        skel1 = skeletonize_3d(im)
-        skel2 = ps.filters.apply_padded(im=im, pad_width=20, pad_val=1,
-                                        func=skeletonize_3d)
+        im = ps.generators.blobs(
+            shape=[100, 100], periodic=False,)
+        skel1 = skeletonize(im)
+        skel2 = ps.filters.apply_padded(
+            im=im,
+            pad_width=20,
+            pad_val=1,
+            func=skeletonize,
+        )
         assert (skel1.astype(bool)).sum() != (skel2.astype(bool)).sum()
 
     def test_trim_small_clusters(self):
         im = ps.generators.blobs(shape=[100, 100],
                                  blobiness=2,
                                  porosity=0.4028,
-                                 seed=0)
+                                 seed=0,
+                                 periodic=False,)
         assert im.sum()/im.size == 0.4028
-        im5 = ps.filters.trim_small_clusters(im=im, size=5)
-        im10 = ps.filters.trim_small_clusters(im=im, size=10)
+        im5 = ps.filters.trim_small_clusters(im=im, min_size=5)
+        im10 = ps.filters.trim_small_clusters(im=im, min_size=10)
         assert im5.sum() > im10.sum()
         label, N = spim.label(im10)
         for i in range(N):
@@ -544,7 +622,8 @@ class FilterTest():
         im = ps.generators.blobs(shape=[50, 50, 50],
                                  porosity=0.492664,
                                  blobiness=0.5,
-                                 seed=0)
+                                 seed=0,
+                                 periodic=False,)
         assert im.sum()/im.size == 0.492664
         np.random.seed(0)
         im2 = random_noise(im)
@@ -557,7 +636,8 @@ class FilterTest():
         im = ps.generators.blobs(shape=[400, 400],
                                  blobiness=[2, 1],
                                  porosity=0.5916375,
-                                 seed=0)
+                                 seed=0,
+                                 periodic=False,)
         assert im.sum()/im.size == 0.5916375
         im_dt = edt(im)
         dt = spim.gaussian_filter(input=im_dt, sigma=0.4)
@@ -575,7 +655,8 @@ class FilterTest():
         im = ps.generators.blobs(shape=[400, 400],
                                  blobiness=[2, 1],
                                  porosity=0.5916375,
-                                 seed=0)
+                                 seed=0,
+                                 periodic=False,)
         assert im.sum()/im.size == 0.5916375
         im_dt = edt(im)
         dt = spim.gaussian_filter(input=im_dt, sigma=0.4)
@@ -587,17 +668,108 @@ class FilterTest():
         assert num_peaks_after_far_trim <= num_peaks_after_close_trim
 
     def test_regions_size(self):
-        im = ps.generators.blobs([50, 50], porosity=0.1164, seed=0)
+        im = ps.generators.blobs(
+            shape=[50, 50], porosity=0.1164, seed=0, periodic=False,)
         assert im.sum()/im.size == 0.1164
         s = ps.filters.region_size(im)
         hits = [1, 2, 3, 4, 5, 6, 8, 9, 18, 23, 24, 26, 28, 31]
         assert np.all(hits == np.unique(s)[1:])
         np.random.seed(0)
-        im = ps.generators.blobs([20, 20, 20], porosity=0.121, seed=0)
+        im = ps.generators.blobs(
+            shape=[20, 20, 20], porosity=0.121, seed=0, periodic=False,)
         assert im.sum()/im.size == 0.121
         s = ps.filters.region_size(im)
         hits = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 16, 17, 19, 31, 32, 37]
         assert np.all(hits == np.unique(s)[1:])
+
+    def test_find_trapped_clusters_side_outlet(self):
+        im = ps.generators.blobs(
+            shape=[100, 100], porosity=0.6, seed=7, periodic=False,)
+        inlets = np.zeros_like(im)
+        inlets[0, :] = True
+        outlets = np.zeros_like(im)
+        outlets[:, -1] = True
+        inv = ps.simulations.drainage(im, inlets=inlets)
+        trp1 = ps.filters.find_trapped_clusters(
+            im=im,
+            seq=inv.im_seq,
+            outlets=outlets,
+            method='labels',
+            )
+        inv = ps.simulations.drainage(im, inlets=inlets)
+        trp2 = ps.filters.find_trapped_clusters(
+            im=im,
+            seq=inv.im_seq,
+            outlets=outlets,
+            method='queue',
+        )
+        assert np.all(trp1 == trp2)
+
+    def test_find_trapped_clusters_return_mask_top_outlet(self):
+        im = ps.generators.blobs(
+            shape=[100, 100], porosity=0.6, seed=7, periodic=False,)
+        inlets = np.zeros_like(im)
+        inlets[0, :] = True
+        outlets = np.zeros_like(im)
+        outlets[-1, :] = True
+        inv = ps.simulations.drainage(im, inlets=inlets)
+        trp1 = ps.filters.find_trapped_clusters(
+            im=im,
+            seq=inv.im_seq,
+            outlets=outlets,
+            method='labels',
+            )
+        inv = ps.simulations.drainage(im, inlets=inlets)
+        trp2 = ps.filters.find_trapped_clusters(
+            im=im,
+            seq=inv.im_seq,
+            outlets=outlets,
+            method='queue',
+        )
+        assert np.all(trp1 == trp2)
+
+    def test_find_trapped_regions_top_outlet(self):
+        im = ps.generators.blobs(
+            shape=[100, 100], porosity=0.6, seed=7, periodic=False,)
+        inlets = np.zeros_like(im)
+        inlets[0, :] = True
+        outlets = np.zeros_like(im)
+        outlets[-1, :] = True
+        inv = ps.simulations.drainage(im, inlets=inlets)
+        trp1 = ps.filters.find_trapped_clusters(
+            im=im,
+            seq=inv.im_seq,
+            outlets=outlets,
+            method='labels',
+        )
+        inv = ps.simulations.drainage(im, inlets=inlets)
+        trp2 = ps.filters.find_trapped_clusters(
+            im=im,
+            seq=inv.im_seq,
+            outlets=outlets,
+            method='queue',
+        )
+
+        assert np.all(trp1 == trp2)
+
+    def test_find_trapped_clusters_with_imbibition(self):
+        # This image has some surface pores which should not become trapped
+        # because outlets are all surfaces
+        im = ps.generators.blobs([100, 100], porosity=0.6, seed=1)
+        faces = ps.generators.borders(im.shape, mode='faces')
+        pc = ps.filters.capillary_transform(
+            im=im,
+            sigma=0.465,
+            theta=140,
+            voxel_size=1e-5,
+        )
+        imb = ps.simulations.imbibition(im=im, pc=pc, steps=50)
+        mask = ps.filters.find_trapped_clusters(
+            im=im, seq=imb.im_seq, outlets=faces, method='labels')
+        assert np.sum(mask[faces]) == 0
+        mask = ps.filters.find_trapped_clusters(
+            im=im, seq=imb.im_seq, outlets=faces, method='queue')
+        assert np.sum(mask[faces]) == 0
 
 
 if __name__ == '__main__':

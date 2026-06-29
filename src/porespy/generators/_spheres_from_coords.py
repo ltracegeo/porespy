@@ -1,7 +1,12 @@
 import logging
-import numpy as np
-from porespy.tools import _insert_disks_at_points, find_bbox
 
+import numpy as np
+
+from porespy.tools import (
+    _insert_disks_at_points,
+    find_bbox,
+    parse_shape,
+)
 
 __all__ = [
     'spheres_from_coords',
@@ -47,6 +52,12 @@ def spheres_from_coords(df, mode='contained', smooth=False):
         ``False`` elsewhere. The size of the returned image will be large enough
         to fit all the spheres plus the radius of the largest sphere.
 
+    Examples
+    --------
+    `Click here
+    <https://porespy.org/examples/generators/reference/spheres_from_coords.html>`_
+    to view online example.
+
     Notes
     -----
     The input data should be in column format as a dictionary of 1D
@@ -59,23 +70,23 @@ def spheres_from_coords(df, mode='contained', smooth=False):
         d['Z'] = np.array([1, 1, 1])
         d['R'] = np.array([0.5, 0.7, 0.6])
 
-    Or a *pandas* ``DataFrame` like this:
+    Or a *pandas* ``DataFrame`` like this:
 
     ==== ==== ==== ==== ====
     ID   'X'  'Y'  'Z'  'R'
     ==== ==== ==== ==== ====
-    0    1    1    1    0.5
-    1    1    3    1    0.7
-    2    2    2    1    0.6
+    0    10   10   10   5
+    1    10   30   10   7
+    2    20   20   10   6
     ==== ==== ==== ==== ====
 
     Or a numpy N-by-3(or 4) array like this:
 
     .. code::
 
-        array([[1, 1, 1, 0.5],
-               [1, 3, 1, 0.7],
-               [2, 2, 1, 0.6]])
+        array([[10, 10, 10, 5],
+               [10, 30, 10, 7],
+               [20, 20, 10, 6]])
 
     Note that in all cases if the radius is not given that it is assumed to be
     a single pixel
@@ -103,6 +114,7 @@ def spheres_from_coords(df, mode='contained', smooth=False):
     x = np.array(np.around(df['X'], decimals=0)).astype(int)
     y = np.array(np.around(df['Y'], decimals=0)).astype(int)
     z = np.array(np.around(df['Z'], decimals=0)).astype(int)
+    crds = np.vstack([x, y, z]).T
 
     if mode == 'contained':
         x += r.max()
@@ -118,12 +130,8 @@ def spheres_from_coords(df, mode='contained', smooth=False):
                          z.max() + 1]).astype(int)
         crds = np.vstack([x, y, z]).T
 
-    mask = np.all(crds == crds[0, :], axis=0)
-    if np.any(mask):
-        crds[:, mask] = 0
-        shape[mask] = 1
-
     logger.info(f"Inserting spheres into image of size {shape}")
+    shape = parse_shape(shape)
     im = np.zeros(shape, dtype=bool)
     im = _insert_disks_at_points(
         im,
@@ -136,4 +144,23 @@ def spheres_from_coords(df, mode='contained', smooth=False):
     im = im.squeeze()
     bbox = find_bbox(im)
     im = im[bbox]
+    mask = [np.all(df[col] == 0) for col in ['X', 'Y', 'Z']]
+    if np.any(mask) and im.ndim > 2:
+        ax = np.where(mask)[0][0]
+        im = np.amax(im, axis=ax) > 0
     return im
+
+
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+
+    df = pd.DataFrame()
+    df['X'] = [10, 10, 20]
+    df['Y'] = [10, 30, 20]
+    df['Z'] = [0, 0, 0]
+    df['R'] = [5, 6, 7]
+
+    im = spheres_from_coords(df)
+    plt.imshow(im)

@@ -38,13 +38,13 @@ shutil.copytree("../examples", "examples", dirs_exist_ok=True)
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
-    "sphinx.ext.autosummary",
     "sphinx.ext.ifconfig",
     "sphinx.ext.viewcode",
     "sphinx.ext.mathjax",
     "sphinx_copybutton",
     "sphinx_design",
     "myst_nb",
+    "autoapi.extension",
 ]
 
 myst_enable_extensions = [
@@ -55,19 +55,54 @@ myst_enable_extensions = [
     "html_image",
 ]
 
+# Force notebook execution during documentation build
+nb_execution_mode = "force" if "CI" in os.environ else "off"
+
 # So that 'sphinx-copybutton' only copies the actual code, not the prompt
 copybutton_prompt_text = r">>> |\.\.\. |\$ |In \[\d*\]: | {2,5}\.\.\.: | {5,8}: "
 copybutton_prompt_is_regexp = True
 
-add_module_names = False  # porespy.generators --> generators
-autosummary_generate = True
+# AutoAPI Configuration
+autoapi_dirs = ["../src"]
+autoapi_type = "python"
+autoapi_options = [
+    "members",
+    "undoc-members",
+    "show-inheritance",
+    "imported-members",
+]
+autoapi_ignore = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*",
+    "*/dns/*",  # Exclude deprecated dns module
+]
+# Include both class and __init__ docstrings
+autoapi_python_class_content = "both"
+autoapi_member_order = "alphabetical"
+# Root directory for generated docs
+autoapi_root = "autoapi"
+# Generate individual API docs for each item
+autoapi_generate_api_docs = True
+# Don't keep the generated RST files
+autoapi_keep_files = False
+# Don't add to main toctree automatically
+autoapi_add_toctree_entry = True
+# Use custom templates
+# autoapi_template_dir = "_templates/autoapi"
+# Each function gets its own page
+autoapi_own_page_level = "function"
+toc_object_entries_show_parents = "hide"
+
+add_module_names = False
+add_package_names = False
 globaltoc_maxdepth = 2
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = ["_templates"]
+# templates_path = ["_templates"]
 # The master toctree document.
 master_doc = "index"
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "_templates"]
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = "sphinx"
 # If true, `todo` and `todoList` produce output, else they produce nothing.
@@ -112,16 +147,16 @@ html_theme_options = {
         {"name": "Issue Tracker", "url": "https://github.com/PMEAL/porespy/issues"},
         {"name": "Get Help", "url": "https://github.com/PMEAL/porespy/discussions"},
     ],
+    "collapse_navigation": False,
     "navigation_with_keys": False,
     "show_prev_next": False,
     "icon_links_label": "Quick Links",
     "use_edit_page_button": False,
-    "search_bar_position": "sidebar",
     "navbar_align": "left",
+    "show_toc_level": 3,  # Show deeper levels in the sidebar
 }
 
 html_sidebars = {}
-
 
 # ------------------------------------------------------------------------#
 # Options for HTMLHelp output                                             #

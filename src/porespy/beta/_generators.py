@@ -1,7 +1,6 @@
-import numpy as np
 from scipy.signal import convolve
-from porespy.tools import ps_rect
 
+from porespy.tools import ps_rect
 
 __all__ = [
     "local_diff",
