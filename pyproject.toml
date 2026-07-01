@@ -23,7 +23,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Physics",
 ]
 dependencies = [
-    "dask",
+    "dask[distributed]",
     "deprecated",
     "edt",
     "matplotlib",
