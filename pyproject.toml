@@ -30,6 +30,7 @@ dependencies = [
     "numba",
     "numpy",
     "pandas",
+    "pyedt",
     "psutil",
     "rich",
     "scikit-image>=0.25.0",
