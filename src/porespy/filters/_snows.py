@@ -746,9 +746,10 @@ def snow_partitioning_parallel(im,
     max_radii_orig = _compute_max_radii_numpy(dt, divs, chunk_shape)
     footprint = np.ones((3,) * im.ndim)
     max_radii_map = spim.maximum_filter(max_radii_orig, footprint=footprint, mode='constant', cval=0)
+    chunks_overlaps = _get_chunks_overlaps(max_radii_map)
     logger.info("Step 1 of 5: Done.")
 
-    # Add a warning if the overlap is getting too large compared to chunk size
+    # Warning if the overlap is too large compared to chunk size
     largest_radius = max_radii_map.max()
     min_chunk_dim = min(chunk_shape)
     if largest_radius > min_chunk_dim / 2:
@@ -762,12 +763,12 @@ def snow_partitioning_parallel(im,
     lazy_results = []
     divs_array = np.array(divs)
     for chunk_idx in np.ndindex(tuple(divs_array)):
-        chunk_with_overlap, overlaps = _get_chunk_with_overlap(dt_chunks, chunk_idx, chunk_shape, max_radii_map)
+        chunk_with_overlap = _get_chunk_with_overlap(dt_chunks, chunk_idx, chunk_shape, chunks_overlaps)
 
         task = _process_chunk_delayed(
             chunk_with_overlap=chunk_with_overlap,
             chunk_idx=chunk_idx,
-            overlaps=overlaps,
+            overlaps=chunks_overlaps,
             r_max=r_max,
             sigma=sigma,
         )
@@ -806,46 +807,65 @@ def snow_partitioning_parallel(im,
     tup.regions = regions
     return tup
 
-def _get_chunk_with_overlap(dt_chunks, chunk_idx, chunk_shape, max_radii_map):
-    required_overlap = int(np.ceil(2 * max_radii_map[chunk_idx]))
-    overlaps = np.zeros((dt_chunks.ndim, 2), dtype=int)
-    for i in range(dt_chunks.ndim):
-        if chunk_idx[i] > 0:
-            overlaps[i, 0] = required_overlap
-        if chunk_idx[i] < max_radii_map.shape[i] - 1:
-            overlaps[i, 1] = required_overlap
+@njit(cache=True)
+def _get_chunks_overlaps(max_radii_map):
+    shape = max_radii_map.shape
+    ndim = max_radii_map.ndim
+    chunks_overlaps = np.empty(shape + (ndim, 2), dtype=np.int64)
 
-    return _get_chunk_with_variable_overlap(dt_chunks, chunk_idx, chunk_shape, overlaps), overlaps
+    neighbor_directions_idxs = [
+        [[(-1, 0, 0)], [(1, 0, 0)]],
+        [[(0, -1, 0)], [(0, 1, 0)]],
+        [[(0, 0, -1)], [(0, 0, 1)]],
+    ]
 
-def _get_chunk_with_variable_overlap(dt, chunk_idx, chunk_shape, overlaps):
+    for chunk_idx in np.ndindex(shape):
+        i, j, k = chunk_idx
+        for axis_index in range(ndim):
+            axis_directions = neighbor_directions_idxs[axis_index]
+            for direction_index, neighbor_directions in enumerate(axis_directions):
+                overlap = 0
+                for (di, dj, dk) in neighbor_directions:
+                    ni, nj, nk = i + di, j + dj, k + dk
+                    if (
+                        0 <= ni < shape[0] and
+                        0 <= nj < shape[1] and
+                        0 <= nk < shape[2]
+                    ):
+                        neighbor_idx = (ni, nj, nk)
+                        max_radius = max(max_radii_map[chunk_idx], max_radii_map[neighbor_idx])
+                        overlap = max(overlap, int(np.ceil(2*max_radius)))
+                chunks_overlaps[chunk_idx][axis_index, direction_index] = overlap
+
+    return chunks_overlaps
+
+def _get_chunk_with_overlap(dt_chunks, chunk_idx, chunk_shape, chunks_overlaps):
     """
     Extracts a chunk from the main image `dt` with the specified variable
     overlap on each face.
     """
     s_ = []
-    for i in range(dt.ndim):
+    for i in range(dt_chunks.ndim):
         start = chunk_idx[i] * chunk_shape[i]
         end = start + chunk_shape[i]
-        s_start = start - overlaps[i, 0]
-        s_end = end + overlaps[i, 1]
-        s_.append(slice(max(0, s_start), min(dt.shape[i], s_end)))
-    return dt[tuple(s_)]
+        s_start = start - chunks_overlaps[chunk_idx][i, 0]
+        s_end = end + chunks_overlaps[chunk_idx][i, 1]
+        s_.append(slice(max(0, s_start), min(dt_chunks.shape[i], s_end)))
+    return dt_chunks[tuple(s_)]
 
-
-def _trim_variable_overlap(chunk, overlaps):
+def _trim_variable_overlap(chunk, chunk_idx, overlaps):
     """
     Trims the processed chunk to remove the variable overlap.
     """
     s_ = []
     for i in range(chunk.ndim):
         # Trimm but let 1 voxel border
-        start = overlaps[i, 0]
-        end = chunk.shape[i] - overlaps[i, 1]
-        start -= np.array(overlaps[i, 0] != 0, int)
-        end += np.array(overlaps[i, 1] != 0, int)
+        start = overlaps[chunk_idx][i, 0]
+        end = chunk.shape[i] - overlaps[chunk_idx][i, 1]
+        start -= int(overlaps[chunk_idx][i, 0] != 0)
+        end += int(overlaps[chunk_idx][i, 1] != 0)
         s_.append(slice(start, end))
     return chunk[tuple(s_)]
-
 
 def _compute_max_radii_numpy(dt, divs, chunk_shape):
     """
@@ -894,7 +914,7 @@ def _process_chunk_delayed(chunk_with_overlap, chunk_idx, overlaps, r_max, sigma
     processed_chunk = _snow_chunked(chunk_with_overlap, r_max=r_max, sigma=sigma)
 
     # Trim the processed chunk to remove overlap
-    trimmed_chunk = _trim_variable_overlap(processed_chunk, overlaps)
+    trimmed_chunk = _trim_variable_overlap(processed_chunk, chunk_idx, overlaps)
 
     return trimmed_chunk, chunk_idx
 
