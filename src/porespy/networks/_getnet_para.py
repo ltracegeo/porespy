@@ -542,6 +542,7 @@ def _jit_regions_to_network_parallel(
     # Initialize arrays
     Ps = np.arange(1, np.amax(im)+1)
     Np = np.int64(Ps.size)
+    Nt = np.int64(0)
     p_coords_cm = np.zeros((Np, im.ndim), dtype=float)
     p_coords_dt = np.zeros((Np, im.ndim), dtype=float)
     p_coords_dt_global = np.zeros((Np, im.ndim), dtype=float)
@@ -554,14 +555,24 @@ def _jit_regions_to_network_parallel(
     p_porosity = np.ones((Np, ), dtype=float)
     # The number of throats is not known at the start, so lists are used
     # which can be dynamically resized more easily.
-    t_conns_0 = []
-    t_conns_1 = []
-    t_dia_inscribed = []
-    t_area = []
-    t_perimeter = []
-    t_coords_0 = []
-    t_coords_1 = []
-    t_coords_2 = []
+    t_conns_0 = List()
+    t_conns_1 = List()
+    t_dia_inscribed = List()
+    t_area = List()
+    t_perimeter = List()
+    t_coords_0 = List()
+    t_coords_1 = List()
+    t_coords_2 = List()
+
+    for i in range(Np):
+        t_conns_0.append(List.empty_list(np.int64))
+        t_conns_1.append(List.empty_list(np.int64))
+        t_dia_inscribed.append(List.empty_list(np.float64))
+        t_area.append(List.empty_list(np.float64))
+        t_perimeter.append(List.empty_list(np.float64))
+        t_coords_0.append(List.empty_list(np.float64))
+        t_coords_1.append(List.empty_list(np.float64))
+        t_coords_2.append(List.empty_list(np.float64))
 
     partial_t_conns_0 = []
     partial_t_conns_1 = []
@@ -573,8 +584,8 @@ def _jit_regions_to_network_parallel(
     partial_t_coords_2 = []
 
     for i in range(threads-1):
-        partial_t_conns_0.append(List.empty_list(np.uint64))
-        partial_t_conns_1.append(List.empty_list(np.uint64))
+        partial_t_conns_0.append(List.empty_list(np.int64))
+        partial_t_conns_1.append(List.empty_list(np.int64))
         partial_t_dia_inscribed.append(List.empty_list(np.float64))
         partial_t_area.append(List.empty_list(np.float64))
         partial_t_perimeter.append(List.empty_list(np.float64))
@@ -599,23 +610,17 @@ def _jit_regions_to_network_parallel(
                         else:
                             worker_status[worker_id] = FINISHED
                     if worker_status[worker_id] == DONE:
+                        worker_pore_id = worker_target[worker_id] - 1
                         for throat_i in range(len(partial_t_conns_0[worker_id])):
-                            t_conns_0.append(
-                                partial_t_conns_0[worker_id][throat_i])
-                            t_conns_1.append(
-                                partial_t_conns_1[worker_id][throat_i])
-                            t_dia_inscribed.append(
-                                partial_t_dia_inscribed[worker_id][throat_i])
-                            t_perimeter.append(
-                                partial_t_perimeter[worker_id][throat_i])
-                            t_area.append(
-                                partial_t_area[worker_id][throat_i])
-                            t_coords_0.append(
-                                partial_t_coords_0[worker_id][throat_i])
-                            t_coords_1.append(
-                                partial_t_coords_1[worker_id][throat_i])
-                            t_coords_2.append(
-                                partial_t_coords_2[worker_id][throat_i])
+                            Nt += 1
+                            t_conns_0[worker_pore_id].append(partial_t_conns_0[worker_id][throat_i])
+                            t_conns_1[worker_pore_id].append(partial_t_conns_1[worker_id][throat_i])
+                            t_dia_inscribed[worker_pore_id].append(partial_t_dia_inscribed[worker_id][throat_i])
+                            t_perimeter[worker_pore_id].append(partial_t_perimeter[worker_id][throat_i])
+                            t_area[worker_pore_id].append(partial_t_area[worker_id][throat_i])
+                            t_coords_0[worker_pore_id].append(partial_t_coords_0[worker_id][throat_i])
+                            t_coords_1[worker_pore_id].append(partial_t_coords_1[worker_id][throat_i])
+                            t_coords_2[worker_pore_id].append(partial_t_coords_2[worker_id][throat_i])
                         if current_pore <= Np:
                             worker_target[worker_id] = current_pore
                             current_pore += 1
@@ -629,8 +634,8 @@ def _jit_regions_to_network_parallel(
                 wait()
                 status = worker_status[self_id]
                 if status == ASSIGNED:
-                    partial_t_conns_0[self_id] = List.empty_list(np.uint64)
-                    partial_t_conns_1[self_id] = List.empty_list(np.uint64)
+                    partial_t_conns_0[self_id] = List.empty_list(np.int64)
+                    partial_t_conns_1[self_id] = List.empty_list(np.int64)
                     partial_t_dia_inscribed[self_id] = List.empty_list(np.float64)
                     partial_t_area[self_id] = List.empty_list(np.float64)
                     partial_t_perimeter[self_id] = List.empty_list(np.float64)
@@ -639,8 +644,8 @@ def _jit_regions_to_network_parallel(
                     partial_t_coords_2[self_id] = List.empty_list(np.float64)
 
                     pore_label = worker_target[self_id]
-
                     pore_id = pore_label - 1
+
                     s = jit_extend_slice(slices[pore_id], im.shape)
                     sub_im = im[s]
                     sub_dt = dt[s]
@@ -717,14 +722,32 @@ def _jit_regions_to_network_parallel(
         value_type=INT_TYPE,
     )
 
-    t_coords_0_arr = np.array(t_coords_0, dtype=np.float64)
-    t_coords_1_arr = np.array(t_coords_1, dtype=np.float64)
-    t_coords_2_arr = np.array(t_coords_2, dtype=np.float64)
+    t_conns_0_arr = np.empty(Nt, dtype=np.int64)
+    t_conns_1_arr = np.empty(Nt, dtype=np.int64)
+    t_dia_inscribed_arr = np.empty(Nt, dtype=np.float64)
+    t_area_arr = np.empty(Nt, dtype=np.float64)
+    t_perimeter_arr = np.empty(Nt, dtype=np.float64)
+    t_coords_0_arr = np.empty(Nt, dtype=np.float64)
+    t_coords_1_arr = np.empty(Nt, dtype=np.float64)
+    t_coords_2_arr = np.empty(Nt, dtype=np.float64)
+
+    throat_id = 0
+    for pore_id in range(Np):
+        for throat_i in range(len(t_conns_0[pore_id])):
+            t_conns_0_arr[throat_id] = t_conns_0[pore_id][throat_i]
+            t_conns_1_arr[throat_id] = t_conns_1[pore_id][throat_i]
+            t_dia_inscribed_arr[throat_id] = t_dia_inscribed[pore_id][throat_i]
+            t_area_arr[throat_id] = t_area[pore_id][throat_i]
+            t_perimeter_arr[throat_id] = t_perimeter[pore_id][throat_i]
+            t_coords_0_arr[throat_id] = t_coords_0[pore_id][throat_i]
+            t_coords_1_arr[throat_id] = t_coords_1[pore_id][throat_i]
+            t_coords_2_arr[throat_id] = t_coords_2[pore_id][throat_i]
+            throat_id += 1
 
     ND = im.ndim
     # Define all the fundamental stuff
-    net_int['throat.conns_0'] = np.array(t_conns_0)
-    net_int['throat.conns_1'] = np.array(t_conns_1)
+    net_int['throat.conns_0'] = t_conns_0_arr
+    net_int['throat.conns_1'] = t_conns_1_arr
     net_float['pore.coords_0'] = p_coords_cm[:, 0]
     net_float['pore.coords_1'] = p_coords_cm[:, 1]
     net_float['pore.coords_2'] = p_coords_cm[:, 2]
@@ -755,8 +778,7 @@ def _jit_regions_to_network_parallel(
     net_float['throat.global_peak_2'] = t_coords_2_arr
     net_float['pore.inscribed_diameter'] = np.copy(p_dia_local)
     net_float['pore.extended_diameter'] = np.copy(p_dia_global)
-    net_float['throat.inscribed_diameter'] = \
-        np.array(t_dia_inscribed, dtype=np.float64) * 2.0
+    net_float['throat.inscribed_diameter'] = t_dia_inscribed_arr * 2.0
     P1 = net_int['throat.conns_0']
     P2 = net_int['throat.conns_1']
     PT1 = np.sqrt((net_float['pore.coords_0'][P1]-t_coords_0_arr)**2
@@ -774,10 +796,10 @@ def _jit_regions_to_network_parallel(
                 + (net_float['pore.coords_2'][P1]-net_float['pore.coords_2'][P2])**2
                 )
     net_float['throat.direct_length'] = dist
-    net_float['throat.perimeter'] = np.array(t_perimeter)
+    net_float['throat.perimeter'] = t_perimeter_arr
     net_float['pore.volume'] = p_volume
     net_float['pore.surface_area'] = p_area_surf
-    A = np.array(t_area)
+    A = t_area_arr
     net_float['throat.cross_sectional_area'] = A
     net_float['throat.equivalent_diameter'] = (4*A/np.pi)**(1/2)
 
