@@ -128,7 +128,7 @@ def snow_partitioning(im, dt=None, r_max=4, sigma=0.4, peaks=None):
     if peaks is None:
         if sigma > 0:
             logger.info(f"Applying Gaussian blur with sigma = {sigma}")
-            dt_blurred = spim.gaussian_filter(input=dt, sigma=sigma)*im
+            dt_blurred = spim.gaussian_filter(input=dt, sigma=sigma)
         else:
             dt_blurred = np.copy(dt)
         peaks = find_peaks(dt=dt_blurred, r_max=r_max)
@@ -136,10 +136,16 @@ def snow_partitioning(im, dt=None, r_max=4, sigma=0.4, peaks=None):
         logger.debug(f"Initial number of peaks: {spim.label(peaks)[1]}")
         peaks = trim_saddle_points(peaks=peaks, dt=dt)
         logger.debug(f"Peaks after trimming saddle points: {spim.label(peaks)[1]}")
-        peaks = trim_nearby_peaks(peaks=peaks, dt=dt)
-        logger.debug(f"Peaks after trimming nearby points: {spim.label(peaks)[1]}")
-    peaks, N = spim.label(peaks > 0, structure=ps_rect(3, im.ndim))
-    regions = watershed(image=-dt, markers=peaks)
+        if len(peaks) > 0:
+            peaks = trim_nearby_peaks(peaks=peaks, dt=dt)
+            logger.debug(f"Peaks after trimming nearby points: {spim.label(peaks)[1]}")
+            peaks, N = spim.label(peaks > 0, structure=ps_rect(3, dt.ndim))
+            regions = watershed(image=-dt, markers=peaks)
+        else:
+            regions = np.ones_like(dt_blurred)
+    else:
+        peaks, N = spim.label(peaks > 0, structure=ps_rect(3, im.ndim))
+        regions = watershed(image=-dt, markers=peaks)
     tup = Results()
     tup.im = im
     tup.dt = dt
@@ -1343,13 +1349,13 @@ def _snow_chunked(dt, r_max=5, sigma=0.4):
     r"""
     This private version of snow is called during snow_parallel.
     """
-    dt2 = spim.gaussian_filter(input=dt, sigma=sigma)
-    peaks = find_peaks(dt=dt2, r_max=r_max)
+    dt_blurred = spim.gaussian_filter(input=dt, sigma=sigma)
+    peaks = find_peaks(dt=dt_blurred, r_max=r_max)
     peaks = trim_saddle_points(peaks=peaks, dt=dt)
     if len(peaks) > 0:
         peaks = trim_nearby_peaks(peaks=peaks, dt=dt)
-        peaks, N = spim.label(peaks > 0)
+        peaks, N = spim.label(peaks > 0, structure=ps_rect(3, dt.ndim))
         regions = watershed(image=-dt, markers=peaks)
     else:
-        regions = np.ones_like(dt2)
+        regions = np.ones_like(dt_blurred)
     return regions * (dt > 0)
