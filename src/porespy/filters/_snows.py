@@ -801,7 +801,7 @@ def snow_partitioning_parallel(im,
     return tup
 
 def _get_chunk_with_overlap(dt_chunks, chunk_idx, chunk_shape, max_radii_map):
-    required_overlap = int(np.ceil(max_radii_map[chunk_idx]))
+    required_overlap = int(np.ceil(2 * max_radii_map[chunk_idx]))
     overlaps = np.zeros((dt_chunks.ndim, 2), dtype=int)
     for i in range(dt_chunks.ndim):
         if chunk_idx[i] > 0:
