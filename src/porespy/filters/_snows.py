@@ -7,10 +7,10 @@ from pathlib import Path
 import dask
 import dask.array as da
 import dask.distributed
+import numba as nb
 import numpy as np
 import scipy.ndimage as spim
 import scipy.spatial as sptl
-from numba import njit, prange
 from skimage.morphology import footprint_rectangle
 from skimage.segmentation import watershed
 
@@ -807,7 +807,7 @@ def snow_partitioning_parallel(im,
     tup.regions = regions
     return tup
 
-@njit(cache=True)
+@nb.njit(cache=True)
 def _get_chunks_overlaps(max_radii_map):
     shape = max_radii_map.shape
     ndim = max_radii_map.ndim
@@ -1167,8 +1167,7 @@ def _watershed_stitching(im, chunk_shape):
             for i in range(1, num):
                 sl = i * (chunk_shape[axis] + 2)
                 sl1 = im[sl - 2, ...]
-                sl1_mask = sl1 > 0
-                sl2 = im[sl - 0, ...] * sl1_mask
+                sl2 = im[sl - 0, ...]
                 sl1_labels = sl1.flatten()[sl1.flatten() > 0]
                 sl2_labels = sl2.flatten()[sl2.flatten() > 0]
                 if sl1_labels.size != sl2_labels.size:
@@ -1176,8 +1175,8 @@ def _watershed_stitching(im, chunk_shape):
                                     'suitable for input image. Change '
                                     'overlapping criteria '
                                     'or manually input value.')
-                keys.append(sl1_labels)
-                values.append(sl2_labels)
+                keys.append(sl2_labels)
+                values.append(sl1_labels)
             im = _replace_labels(array=im, keys=keys, values=values)
             im = im.swapaxes(axis, 0)
     im = _trim_internal_slice(im=im, chunk_shape=chunk_shape)
@@ -1186,75 +1185,9 @@ def _watershed_stitching(im, chunk_shape):
     return im
 
 
-@njit(parallel=True)
-def _copy(im, output):
-    r"""
-    The function copy the input array and make output array that is
-    allocated in different memory space. This a numba version of copy
-    function of numpy. Because each element is copied using parallel
-    approach this implementation is faster than numpy version of copy.
+_KEY_VALUE_DICT_TYPE = nb.types.DictType(nb.types.int64, nb.types.int64)
 
-    Parameters
-    ----------
-    array: ndarray
-        Array that needs to be copied.
-
-    Returns
-    -------
-    output: ndarray
-        Copied array.
-
-    """
-
-    if im.ndim == 3:
-        for i in prange(im.shape[0]):
-            for j in prange(im.shape[1]):
-                for k in prange(im.shape[2]):
-                    output[i, j, k] = im[i, j, k]
-    elif im.ndim == 2:
-        for i in prange(im.shape[0]):
-            for j in prange(im.shape[1]):
-                output[i, j] = im[i, j]
-    else:
-        for i in prange(im.shape[0]):
-            output[i] = im[i]
-
-    return output
-
-
-@njit(parallel=True)
-def _replace(array, keys, values, ind_sort):
-    r"""
-    This function replace keys elements in input array with new value
-    elements. This function is used as internal function of
-    replace_relabels.
-
-    Parameters
-    ----------
-    array : ndarray
-        Array which requires replacing labels.
-    keys :  array_like
-        1d array containing unique labels that need to be replaced.
-    values : array_like
-        1d array containing unique values that will be assigned to labels.
-
-    Returns
-    -------
-    array : ndarray
-        Array with replaced labels.
-
-    """
-    # ind_sort = np.argsort(keys)
-    keys_sorted = keys[ind_sort]
-    values_sorted = values[ind_sort]
-    s_keys = set(keys)
-
-    for i in prange(array.shape[0]):
-        if array[i] in s_keys:
-            ind = np.searchsorted(keys_sorted, array[i])
-            array[i] = values_sorted[ind]
-
-
+@nb.njit(cache=False)  # Can't use cache because of _translate
 def _replace_labels(array, keys, values):
     r"""
     Replace labels in array provided as keys to values.
@@ -1273,17 +1206,63 @@ def _replace_labels(array, keys, values):
     array : ndarray
         Array with replaced labels.
     """
-    a_shape = array.shape
-    array = array.flatten()
-    keys = np.concatenate(keys, axis=0)
-    values = np.concatenate(values, axis=0)
-    ind_sort = np.argsort(keys)
-    _replace(array, keys, values, ind_sort)
+    key_values_dict = nb.typed.Dict.empty(
+        key_type=nb.types.int64,
+        value_type=_KEY_VALUE_DICT_TYPE,
+    )
+    for i in range(len(values)):
+        for j in range(len(values[i])):
+            value = values[i][j]
+            key = keys[i][j]
 
-    return array.reshape(a_shape)
+            if key not in key_values_dict:
+                value_count_dict = nb.typed.Dict.empty(
+                    key_type=nb.types.int64,
+                    value_type=nb.types.int64,
+                )
+                key_values_dict[key] = value_count_dict
+                value_count_dict[value] = 1
+            else:
+                value_count_dict = key_values_dict[key]
+
+                if value not in value_count_dict:
+                    value_count_dict[value] = 1
+                else:
+                    value_count_dict[value] += 1
+
+    translation_dict = nb.typed.Dict.empty(
+        key_type=nb.types.int64,
+        value_type=nb.types.int64,
+    )
+    for key, value_count_dict in key_values_dict.items():
+        target_value = 0
+        max_count = 0
+        for value, count in value_count_dict.items():
+            if count > max_count:
+                target_value = value
+                max_count = count
+
+        if max_count != 0:
+            translation_dict[key] = target_value
+
+    _translate(array, translation_dict)
+    return array
 
 
-@njit()
+@nb.njit(cache=False)  # Can't use cache for recursive functions
+def _translate(array, translation_dict):
+    if array.ndim > 1:
+        for i in range(array.shape[0]):
+            new_array = array[i]
+            _translate(new_array, translation_dict)
+    else:
+        for i in range(array.shape[0]):
+            old_value = array[i]
+            if old_value in translation_dict:
+                array[i] = translation_dict[old_value]
+
+
+@nb.njit()
 def _sequence(array, count):
     r"""
     Internal function of resequnce_labels method. This function resquence
@@ -1322,7 +1301,7 @@ def _sequence(array, count):
         i += 1
 
 
-@njit(parallel=True)
+@nb.njit(parallel=True)
 def _amax(array):
     r"""
     Find largest element in an array using fast parallel numba technique.
