@@ -707,29 +707,18 @@ def snow_partitioning_parallel(im,
     # Adjust image shape according to specified dimension
     if isinstance(divs, int):
         divs = [divs for i in range(im.ndim)]
-    shape = []
-    for i in range(im.ndim):
-        shape.append(divs[i] * (im.shape[i] // divs[i]))
 
-    if tuple(shape) != im.shape:
-        for i in range(im.ndim):
-            im = im.swapaxes(0, i)
-            im = im[:shape[i], ...]
-            im = im.swapaxes(i, 0)
-            if dt is not None:
-                dt = dt.swapaxes(0, i)
-                dt = dt[:shape[i], ...]
-                dt = dt.swapaxes(i, 0)
-        logger.debug(f'Image was cropped to shape {shape}')
+    divisible = Divisible(im, divs)
+    im = divisible.make_divisible(im)
+    if dt is not None:
+        dt = divisible.make_divisible(dt)
+    chunk_shape = divisible.get_chunk_shape()
 
     logger.info('Beginning parallel SNOW algorithm with variable overlap...')
 
     if dt is None:
         logger.info("Calculating distance transform")
         dt = edt((im > 0))
-
-    # Get chunk shape
-    chunk_shape = tuple((np.array(shape) / np.array(divs)).astype(int))
 
     # --- Start of new variable overlap logic ---
 
@@ -779,7 +768,7 @@ def snow_partitioning_parallel(im,
 
     # 4. Reassemble the image from processed chunks
     logger.info("Step 4 of 5: Reassembling image from chunks...")
-    regions = np.zeros(np.array(shape) + 2 * np.array(divs) - 2, dtype=np.int32)
+    regions = np.zeros(divisible.get_shape() + 2 * np.array(divs) - 2, dtype=np.int32)
 
     for chunk_data, chunk_idx in results_list:
         s_ = []
@@ -799,9 +788,9 @@ def snow_partitioning_parallel(im,
     logger.info("Step 5 of 5: Done.")
 
     tup = Results()
-    tup.im = im
-    tup.dt = dt
-    tup.regions = regions
+    tup.im = divisible.make_original_shape(im)
+    tup.dt = divisible.make_original_shape(dt)
+    tup.regions = divisible.make_original_shape(regions)
     return tup
 
 @nb.njit(cache=True)
@@ -1356,3 +1345,31 @@ def _snow_chunked(dt, r_max=5, sigma=0.4):
     else:
         regions = np.ones_like(dt_blurred)
     return regions * mask
+
+
+class Divisible:
+    def __init__(self, reference_im, divs):
+        self.divs = np.array(divs)
+        self.ndim = reference_im.ndim
+        self.original_shape = np.array(reference_im.shape)
+
+        self.new_shape = []
+        for i in range(reference_im.ndim):
+            self.new_shape.append(int(np.ceil(self.original_shape[i] / divs[i]) * divs[i]))
+        self.new_shape = np.array(self.new_shape)
+
+        self.padding = self.new_shape - self.original_shape
+
+        self.chunk_shape = self.new_shape // self.divs
+
+    def get_shape(self):
+        return self.new_shape
+
+    def get_chunk_shape(self):
+        return self.chunk_shape
+
+    def make_divisible(self, im):
+        return np.pad(im, [(0, p) for p in self.padding], mode='edge')
+
+    def make_original_shape(self, im):
+        return im[tuple(slice(0, s) for s in self.original_shape)]
