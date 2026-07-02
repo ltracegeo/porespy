@@ -128,7 +128,7 @@ def snow_partitioning(im, dt=None, r_max=4, sigma=0.4, peaks=None):
     if peaks is None:
         if sigma > 0:
             logger.info(f"Applying Gaussian blur with sigma = {sigma}")
-            dt_blurred = spim.gaussian_filter(input=dt, sigma=sigma)
+            dt_blurred = spim.gaussian_filter(input=dt, sigma=sigma)*im
         else:
             dt_blurred = np.copy(dt)
         peaks = find_peaks(dt=dt_blurred, r_max=r_max)
@@ -332,15 +332,14 @@ def find_peaks(dt, r_max=4, strel=None, sigma=None, parallel_kw={"divs": 1}):
     # parse out divs from parallel_kw, take from settings if not given!
     divs = parallel_kw.get("divs", settings.divs)
     cores = parallel_kw.get("cores", settings.ncores)
-    im = dt > 0
-    _check_for_singleton_axes(im)
+    _check_for_singleton_axes(dt)
     if strel is None:
-        strel = ps_round(r=r_max, ndim=im.ndim)
+        strel = ps_round(r=r_max, ndim=dt.ndim)
     if sigma is not None:
         dt = spim.gaussian_filter(dt, sigma=sigma)
     parallel = False
     if isinstance(divs, int):
-        divs = [divs]*len(im.shape)
+        divs = [divs]*len(dt.shape)
     if np.any(np.array(divs) > 1):
         parallel = True
         logger.info(f'Performing {inspect.currentframe().f_code.co_name} in parallel')
@@ -348,13 +347,11 @@ def find_peaks(dt, r_max=4, strel=None, sigma=None, parallel_kw={"divs": 1}):
         overlap = max(strel.shape)
         parallel_kw = {"divs": divs, "overlap": overlap, "cores": cores}
         mx = chunked_func(func=spim.maximum_filter, parallel_kw=parallel_kw,
-                          im_arg='input', input=dt + 2.0 * (~im),
+                          im_arg='input', input=dt,
                           footprint=strel)
     else:
-        # The "2 * (~im)" sets solid voxels to 2 so peaks are not found
-        # at the void/solid interface
-        mx = spim.maximum_filter(dt + 2.0 * (~im), footprint=strel)
-    peaks = (dt == mx) * im
+        mx = spim.maximum_filter(dt, footprint=strel)
+    peaks = (dt == mx)
     return peaks
 
 
@@ -1348,7 +1345,8 @@ def _snow_chunked(dt, r_max=5, sigma=0.4):
     r"""
     This private version of snow is called during snow_parallel.
     """
-    dt_blurred = spim.gaussian_filter(input=dt, sigma=sigma)
+    mask = dt > 0
+    dt_blurred = spim.gaussian_filter(input=dt, sigma=sigma)*mask
     peaks = find_peaks(dt=dt_blurred, r_max=r_max)
     peaks = trim_saddle_points(peaks=peaks, dt=dt)
     if len(peaks) > 0:
@@ -1357,4 +1355,4 @@ def _snow_chunked(dt, r_max=5, sigma=0.4):
         regions = watershed(image=-dt, markers=peaks)
     else:
         regions = np.ones_like(dt_blurred)
-    return regions * (dt > 0)
+    return regions * mask
