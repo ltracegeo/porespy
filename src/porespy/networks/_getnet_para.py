@@ -14,7 +14,6 @@ from porespy.tools import (
     get_edt,
     jit_extend_slice,
     jit_marching_cubes_area_and_volume,
-    jit_marching_squares_perimeter_and_area,
     make_contiguous,
     pad,
 )
@@ -384,7 +383,7 @@ def _get_throats(
                     (0, 0, -1, 2),
                     (0, 0, 1, 2),
                 )
-    
+
     areas_projections = {
         0: {-1: 0.},
         1: {-1: 0.},
@@ -401,7 +400,7 @@ def _get_throats(
                     y2 = y + dy
                     z2 = z + dz
                     if pore_im[x2, y2, z2] == 0:
-                        
+
                         neighbour_pore_label = sub_im[x2, y2, z2]
                         neighbour_pore_id = neighbour_pore_label - 1
                         if neighbour_pore_id == -1:
@@ -439,8 +438,8 @@ def _get_throats(
                                 (y2) * voxel_size[1],
                                 (z2) * voxel_size[2],
                                 )
-                            
-                        ### Check if is border
+
+                        # Check if is border
                         perimeter = 0
                         try:
                             if (ax == 0) and (dx == 1):

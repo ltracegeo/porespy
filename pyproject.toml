@@ -23,13 +23,14 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Physics",
 ]
 dependencies = [
-    "dask",
+    "dask[distributed]",
     "deprecated",
     "edt",
     "matplotlib",
     "numba",
     "numpy",
     "pandas",
+    "pyedt",
     "psutil",
     "rich",
     "scikit-image>=0.25.0",
