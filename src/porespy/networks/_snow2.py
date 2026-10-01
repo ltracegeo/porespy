@@ -3,7 +3,8 @@ import logging
 import numpy as np
 
 from porespy.filters import snow_partitioning, snow_partitioning_parallel
-from porespy.tools import Results, get_edt, get_jit_edt_cpu
+from porespy.filters._snows import _min_chunk_shape, _normalize_divs
+from porespy.tools import Results, get_edt, get_jit_edt_cpu, settings
 from porespy.networks import regions_to_network_parallel
 
 from ._funcs import add_boundary_regions, label_boundaries, label_phases
@@ -17,24 +18,17 @@ jit_edt_cpu = get_jit_edt_cpu()
 logger = logging.getLogger(__name__)
 
 
-def estimate_overlap_and_chunk(im, dt=None):
-    divs = [2,] * im.ndim
-
-    shape = []
-    for i in range(im.ndim):
-        shape.append(divs[i] * (im.shape[i] // divs[i]))
-
-    if tuple(shape) != im.shape:
-        for i in range(im.ndim):
-            im = im.swapaxes(0, i)
-            im = im[: shape[i], ...]
-            im = im.swapaxes(i, 0)
-
-    chunk_shape = (np.array(shape) / np.array(divs)).astype(int)
+def estimate_overlap_and_chunk(im, divs, dt=None):
+    r"""
+    Returns the largest inscribed radius of ``im`` and the smallest chunk
+    shape produced by ``divs`` (same chunking as
+    ``snow_partitioning_parallel``: near-equal chunks, no padding/cropping).
+    """
+    divs = _normalize_divs(divs, im.shape)
+    chunk_shape = _min_chunk_shape(im.shape, divs)
     if dt is None:
-        dt = edt((im > 0))
+        dt = edt(im > 0)
     overlap = dt.max()
-
     return overlap, chunk_shape
 
 
@@ -51,6 +45,7 @@ def snow2(
     parallel_kw={},
     parallel_extraction=False,
     force_cpu=False,
+    mask_watershed=False,
 ):
     r"""
     Applies the SNOW algorithm to each phase indicated in ``phases``.
@@ -157,6 +152,12 @@ def snow2(
                    serial to minimize memory usage.
         ========== ============================================================
 
+    mask_watershed : bool
+        If True the watershed of each phase floods only that phase. Several
+        times faster, especially for minority phases; pore components with
+        no marker are left unlabelled instead of being merged into an
+        unrelated pore through the other phases. Default False (legacy).
+
     Returns
     -------
     network : Results object
@@ -208,20 +209,10 @@ def snow2(
     else:
         vals = np.unique(phases)
         vals = vals[vals > 0]
+    # Parallel snow does not accept peaks, so if they are provided,
+    # disable parallelization
     if peaks is not None:
         parallel_kw = None
-    overlaps = {}
-    for i in vals:
-        phase = phases == i
-        if force_cpu:
-            phase_dt = jit_edt_cpu(phase)
-        else:
-            phase_dt = None
-        overlaps[i], chunk = estimate_overlap_and_chunk(phase, dt=phase_dt)
-        # TODO: this may not be the overlap the user provides!
-        if (overlaps[i] > (chunk//2 - 1)).any():
-            parallel_kw = None
-            logger.warning("Disabling paralelization as overlap exceeds than chunk size.")
     if type(sigma) is not dict:
         sigma_dict = {}
         for i in vals:
@@ -232,27 +223,41 @@ def snow2(
         logger.info(f"Processing phase {i}...")
         phase = phases == i
         pk = None if peaks is None else peaks*phase
-        if force_cpu:
-            dt = jit_edt_cpu(phase)
-        else:
-            dt = None
-        if parallel_kw is not None:
+        # Distance transform computed once per phase and reused for the
+        # overlap check and the partitioning
+        dt = jit_edt_cpu(phase) if force_cpu else edt(phase)
+        # Parallelization is decided per phase: a phase with large features
+        # falls back to serial without affecting the other phases
+        use_parallel = parallel_kw is not None
+        if use_parallel:
+            divs = parallel_kw.get("divs", settings.divs)
+            overlap, chunk = estimate_overlap_and_chunk(phase, divs, dt=dt)
+            if (overlap > (chunk // 2 - 1)).any():
+                use_parallel = False
+                logger.warning(
+                    f"Phase {i}: disabling parallelization, largest radius "
+                    f"({overlap:.1f}) exceeds half the smallest chunk "
+                    f"{tuple(int(c) for c in chunk)} for divs={divs}."
+                )
+        if use_parallel:
             snow = snow_partitioning_parallel(
                 im=phase,
                 sigma=sigma[i],
                 r_max=r_max,
                 parallel_kw=parallel_kw,
-                overlap=overlaps[i],
                 dt=dt,
+                mask_watershed=mask_watershed,
             )
         else:
             snow = snow_partitioning(
                 im=phase,
                 dt=dt,
-                sigma=sigma[i], 
+                sigma=sigma[i],
                 r_max=r_max,
                 peaks=pk,
+                mask_watershed=mask_watershed,
                 )
+        del dt
         if regions is None:
             regions = np.zeros_like(snow.regions, dtype=int)
         # Note: Using snow.regions > 0 here instead of phase is needed to

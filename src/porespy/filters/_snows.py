@@ -44,7 +44,7 @@ tqdm = get_tqdm()
 logger = logging.getLogger(__name__)
 
 
-def snow_partitioning(im, dt=None, r_max=4, sigma=0.4, peaks=None):
+def snow_partitioning(im, dt=None, r_max=4, sigma=0.4, peaks=None, mask_watershed=False):
     r"""
     Partition the void space into pore regions using a marker-based
     watershed algorithm
@@ -75,6 +75,11 @@ def snow_partitioning(im, dt=None, r_max=4, sigma=0.4, peaks=None):
         This allows for comparison of peak finding algorithms for instance.
         If this argument is provided, then ``r_max`` and ``sigma`` are ignored
         since these are specfically used in the peak finding process.
+    mask_watershed : bool
+        If True the watershed floods only the phase of interest. This is
+        several times faster (the solid is not flooded) and pore components
+        without any marker are left as 0 instead of receiving the label of
+        an unrelated pore through the solid. Default False (legacy result).
 
     Returns
     -------
@@ -140,12 +145,14 @@ def snow_partitioning(im, dt=None, r_max=4, sigma=0.4, peaks=None):
             peaks = trim_nearby_peaks(peaks=peaks, dt=dt)
             logger.debug(f"Peaks after trimming nearby points: {spim.label(peaks)[1]}")
             peaks, N = spim.label(peaks > 0, structure=ps_rect(3, dt.ndim))
-            regions = watershed(image=-dt, markers=peaks)
+            regions = watershed(image=-dt, markers=peaks,
+                                mask=im if mask_watershed else None)
         else:
             regions = np.ones_like(dt_blurred)
     else:
         peaks, N = spim.label(peaks > 0, structure=ps_rect(3, im.ndim))
-        regions = watershed(image=-dt, markers=peaks)
+        regions = watershed(image=-dt, markers=peaks,
+                            mask=im if mask_watershed else None)
     tup = Results()
     tup.im = im
     tup.dt = dt
@@ -593,25 +600,7 @@ def trim_nearby_peaks(peaks, dt, f=1):
     except ValueError:
         return peaks
     L = dt[tuple(crds.T)]  # Get distance to solid for each peak
-    # Add tiny amount to joggle points to avoid equal distances to solid
-    # arange was added instead of random values so the results are repeatable
-    L = L + np.arange(len(L))*1e-6
-
-    tree = sptl.KDTree(data=crds)
-    # Find list of nearest peak to each peak
-    temp = tree.query(x=crds, k=2)
-    nearest_neighbor = temp[1][:, 1]
-    dist_to_neighbor = temp[0][:, 1]
-    del temp, tree  # Free-up memory
-    hits = np.where(dist_to_neighbor <= f * L)[0]
-    # Drop peak that is closer to the solid than it's neighbor
-    drop_peaks = []
-    for i in hits:
-        if L[i] < L[nearest_neighbor[i]]:
-            drop_peaks.append(i)
-        else:
-            drop_peaks.append(nearest_neighbor[i])
-    drop_peaks = np.unique(drop_peaks)
+    drop_peaks = _nearby_peaks_to_drop(crds, L, f=f)
 
     new_peaks = ~np.isin(labels, drop_peaks+1)*peaks
     return new_peaks
@@ -644,154 +633,428 @@ def snow_partitioning_parallel(im,
                                overlap=None,
                                cores=None,
                                dt=None,
+                               maxiter=20,
+                               mask_watershed=False,
                                ):
     r"""
-    Performs SNOW algorithm in parallel (or serial) to reduce time
-    (or memory usage) by geometric domain decomposition of large images.
+    Performs the SNOW algorithm by geometric domain decomposition, with
+    globally consistent watershed markers.
+
+    The pipeline is split so that every step that decides *which markers
+    exist* is exact (independent of ``divs``), while the two expensive
+    volumetric steps stay chunked:
+
+    1. Distance transform: computed once on the full image (or supplied).
+    2. Candidate peaks (chunked, exact): Gaussian blur + maximum filter on
+       each chunk with an overlap of ``blur_radius + r_max``. At that
+       overlap both filters are local, so the result is identical to the
+       global computation.
+    3. Saddle trimming (parallel over peak clusters, exact): each
+       face-connected peak cluster is tested against the *global* distance
+       transform, exactly as ``trim_saddle_points`` does. Clusters are
+       independent, so this parallelizes without any overlap.
+    4. Nearby-peak trimming and marker labelling (global, sparse): done on
+       peak coordinates only (KD-tree), so it is cheap even for large
+       volumes. Markers are labelled once, globally, in raster order.
+    5. Watershed (chunked): each chunk floods ``-dt`` with the global
+       markers that fall inside its window (variable overlap, as before)
+       and keeps only its core. Labels are already global, so there is no
+       relabelling or stitching step.
+
+    Only step 5 can differ from serial ``snow_partitioning``, and only where
+    a basin extends beyond a chunk's window. Chunks have near-equal sizes,
+    so the image is never padded or cropped.
 
     Parameters
     ----------
     im : ndarray
-        A binary image of porous media with 'True' values indicating
-        phase of interest.
+        Boolean image, ``True`` for the phase of interest.
+    r_max : int
+        Radius of the maximum filter used to find peaks.
+    sigma : float
+        Standard deviation of the Gaussian blur applied to ``dt`` before
+        peak finding. 0 disables it.
     parallel_kw : dict
-        Dictionary containing the settings for parallelization by chunking. The
-        optional settings include `divs` (scalar or list of scalars,
-        default = [2, 2, 2]), `overlap` (scalar or list of scalars, optional),
-        and `cores` (scalar, default is all available cores).
-
-        `divs` is the number of times to divide the image for parallel
-        processing. If `1` then parallel processing does not occur. `2` is
-        equivalent to `[2, 2, 2]` for a 3D image. If a list is provided, each
-        respective axis will be divided by its corresponding number in the
-        list. For example, [2, 3, 4] will divide z, y, and x axis to 2, 3,
-        and 4 respectively.
-
-        `overlap` is the amount of overlap to include when dividing up the image.
-        This value will almost always be the size (i.e. radius) of the
-        structuring element. If not specified then the amount of overlap
-        is inferred from the size of the structuring element, in which
-        case the `strel_arg` must be specified.
-
-        `cores` is the number of cores that will be used to parallel process all
-        domains. If ``None`` then all cores will be used but user can specify
-        any integer values to control the memory usage. Setting value to 1 will
-        effectively process the chunks in serial to minimize memory usage.
+        ``divs`` (scalar or list), ``cores`` (int) and ``overlap`` (int,
+        optional). ``overlap`` is a *minimum* watershed overlap in voxels
+        per face; the variable overlap derived from the local maximum radius
+        is used when larger. Keys in ``parallel_kw`` take precedence over
+        the keyword arguments of the same name.
+    dt : ndarray, optional
+        Distance transform of ``im``. Computed if not given.
+    maxiter : int
+        Passed to the saddle-point trimming (same meaning as in
+        ``trim_saddle_points``).
+    mask_watershed : bool
+        Flood only the phase of interest (see ``snow_partitioning``).
 
     Returns
     -------
-    regions : ndarray
-        Partitioned image of segmented regions with unique labels. Each
-        region correspond to pore body while intersection with other
-        region correspond throat area.
-
-    Examples
-    --------
-    `Click here
-    <https://porespy.org/examples/filters/reference/snow_partitioning_parallel.html>`__
-    to view online example.
-
+    Results object with ``im``, ``dt``, ``regions`` and ``markers`` (a
+    tuple ``(coords, labels)`` with the marker voxels in sparse form).
     """
-    # parse out divs, cores, overlap from parallel_kw
-    # take default from settings if not on parallel_kw dict
-    divs = parallel_kw.get("divs", settings.divs)
-    cores = parallel_kw.get("cores", settings.ncores)
-    overlap = parallel_kw.get("overlap", settings.overlap)
+    ndim = im.ndim
+    divs = parallel_kw.get("divs", divs if divs is not None else settings.divs)
+    cores = parallel_kw.get("cores", cores if cores is not None else settings.ncores)
+    min_overlap = parallel_kw.get("overlap", overlap if overlap is not None else settings.overlap)
+    divs = _normalize_divs(divs, im.shape)
 
-    try:
-        dask.distributed.get_client()  # checks for distributed context
-        distributed = True
-    except ValueError:
-        distributed = False
-
-    # Adjust image shape according to specified dimension
-    if isinstance(divs, int):
-        divs = [divs for i in range(im.ndim)]
-
-    divisible = Divisible(im, divs)
-    im = divisible.make_divisible(im)
-    if dt is not None:
-        dt = divisible.make_divisible(dt)
-    chunk_shape = divisible.get_chunk_shape()
-
-    logger.info('Beginning parallel SNOW algorithm with variable overlap...')
-
+    im = im > 0
     if dt is None:
         logger.info("Calculating distance transform")
-        dt = edt((im > 0))
+        dt = edt(im)
+    dt = np.ascontiguousarray(dt)
+    if dt.shape != im.shape:
+        raise ValueError(f"dt shape {dt.shape} does not match image shape {im.shape}")
 
-    # --- Start of new variable overlap logic ---
+    chunks = list(_chunk_grid(im.shape, divs))
+    blur_r = int(4.0 * float(sigma) + 0.5) if sigma > 0 else 0
+    marker_overlap = blur_r + int(np.ceil(r_max))
 
-    # 1. Pre-compute Local Radii for each chunk's 3x3x3 neighborhood
-    logger.info("Step 1 of 5: Pre-computing max radii for each chunk...")
-    if distributed:
-        _save_to_stack_numpy(dt, "regions_npy_stack", chunk_shape)
-        dt_chunks = _load_delayed_from_stack("regions_npy_stack", chunk_shape, divs, dt.dtype)
-    else:
-        dt_chunks = da.from_array(dt, chunks=chunk_shape)
-    max_radii_orig = _compute_max_radii_numpy(dt, divs, chunk_shape)
-    footprint = np.ones((3,) * im.ndim)
-    max_radii_map = spim.maximum_filter(max_radii_orig, footprint=footprint, mode='constant', cval=0)
-    chunks_overlaps = _get_chunks_overlaps(max_radii_map)
-    logger.info("Step 1 of 5: Done.")
+    executor = _ChunkExecutor(dt, cores)
+    try:
+        # Step 2: candidate peaks, chunked with a small exact overlap
+        logger.info("Step 1 of 4: Finding candidate peaks (chunked)...")
+        tasks = []
+        for _, core in chunks:
+            win, core_in_win = _window(core, [marker_overlap] * ndim,
+                                       [marker_overlap] * ndim, im.shape)
+            tasks.append((win, core_in_win, r_max, sigma))
+        cand = executor.map(_task_candidate_peaks, tasks)
+        cand = np.concatenate(cand, axis=0) if len(cand) else np.empty((0, ndim), np.int64)
+        cand = _sort_raster(cand, im.shape)
+        logger.info(f"Candidate peak voxels: {len(cand)}")
 
-    # Warning if the overlap is too large compared to chunk size
-    largest_radius = max_radii_map.max()
-    min_chunk_dim = min(chunk_shape)
-    if largest_radius > min_chunk_dim / 2:
-        logger.warning(
-            f"The largest feature radius ({largest_radius:.2f}) is more than "
-            f"half the smallest chunk dimension ({min_chunk_dim})."
-        )
+        # Step 3: saddle trimming, parallel over face-connected clusters
+        logger.info("Step 2 of 4: Trimming saddle points (per cluster)...")
+        comp = _connected_components(cand, connectivity=1)
+        groups = _group_components(comp, executor.n_slots * 4)
+        tasks = [(cand[vox_idx], comp_local, n_comp, maxiter)
+                 for vox_idx, comp_local, n_comp in groups]
+        kept = executor.map(_task_trim_saddle, tasks)
+        kept = np.concatenate(kept) if len(kept) else np.empty(0, np.int64)
+        if len(cand):
+            cand_lin = np.ravel_multi_index(tuple(cand.T), im.shape)
+            peaks = cand[np.isin(cand_lin, kept)]  # == new_peaks * peaks
+        else:
+            peaks = cand
+        logger.info(f"Peak voxels after saddle trimming: {len(peaks)}")
 
-    # 2. Build Dask graph for chunk processing
-    logger.info("Step 2 of 5: Building Dask graph for chunk processing...")
-    lazy_results = []
-    divs_array = np.array(divs)
-    for chunk_idx in np.ndindex(tuple(divs_array)):
-        chunk_with_overlap = _get_chunk_with_overlap(dt_chunks, chunk_idx, chunk_shape, chunks_overlaps)
+        # Step 4: nearby-peak trimming and global labelling (sparse)
+        logger.info("Step 3 of 4: Trimming nearby peaks and labelling markers...")
+        marker_coords, marker_labels = _global_markers(peaks, dt, im.shape)
+        n_markers = int(marker_labels.max()) if len(marker_labels) else 0
+        logger.info(f"Number of markers: {n_markers}")
 
-        task = _process_chunk_delayed(
-            chunk_with_overlap=chunk_with_overlap,
-            chunk_idx=chunk_idx,
-            overlaps=chunks_overlaps,
-            r_max=r_max,
-            sigma=sigma,
-        )
-        lazy_results.append(task)
-    logger.info("Step 2 of 5: Done.")
+        # Step 5: chunked watershed with global markers
+        logger.info("Step 4 of 4: Watershed (chunked, global markers)...")
+        ws_overlaps = _watershed_overlaps(dt, chunks, divs, min_overlap)
+        tasks = []
+        for idx, core in chunks:
+            lo, hi = ws_overlaps[idx]
+            win, core_in_win = _window(core, lo, hi, im.shape)
+            inside = np.ones(len(marker_coords), dtype=bool)
+            for ax, w in enumerate(win):
+                inside &= (marker_coords[:, ax] >= w.start) & (marker_coords[:, ax] < w.stop)
+            start = np.array([w.start for w in win])
+            tasks.append((win, core_in_win, marker_coords[inside] - start,
+                          marker_labels[inside], mask_watershed))
+        cores_out = executor.map(_task_watershed, tasks)
+    finally:
+        executor.close()
 
-    # 3. Compute the results in parallel
-    logger.info("Step 3 of 5: Executing Dask graph...")
-    results_list = dask.compute(*lazy_results, num_workers=cores)
-    logger.info("Step 3 of 5: Done.")
-
-    # 4. Reassemble the image from processed chunks
-    logger.info("Step 4 of 5: Reassembling image from chunks...")
-    regions = np.zeros(divisible.get_shape() + 2 * np.array(divs) - 2, dtype=np.int32)
-
-    for chunk_data, chunk_idx in results_list:
-        s_ = []
-        for i in range(im.ndim):
-            start = chunk_idx[i] * (chunk_shape[i] + 2)
-            start -= np.array(start > 0, int)
-            end = start + chunk_data.shape[i]
-            s_.append(slice(start, end))
-
-        regions[tuple(s_)] = chunk_data
-
-    regions = relabel_chunks(im=regions, chunk_shape=chunk_shape)
-    logger.info("Step 4 of 5: Done.")
-
-    logger.info("Step 5 of 5: Stitching chunk boundaries...")
-    regions = _watershed_stitching(im=regions, chunk_shape=chunk_shape)
-    logger.info("Step 5 of 5: Done.")
+    regions = np.zeros(im.shape, dtype=np.int32)
+    for (_, core), out in zip(chunks, cores_out):
+        regions[core] = out
 
     tup = Results()
-    tup.im = divisible.make_original_shape(im)
-    tup.dt = divisible.make_original_shape(dt)
-    tup.regions = divisible.make_original_shape(regions)
+    tup.im = im
+    tup.dt = dt
+    tup.regions = regions
+    tup.markers = (marker_coords, marker_labels)
     return tup
+
+
+# ---------------------------------------------------------------------------
+# Helpers for snow_partitioning_parallel
+# ---------------------------------------------------------------------------
+
+def _normalize_divs(divs, shape):
+    ndim = len(shape)
+    if np.isscalar(divs):
+        divs = [divs] * ndim
+    divs = [int(d) for d in divs]
+    if len(divs) != ndim:
+        raise ValueError(f"divs must be a scalar or have {ndim} entries, got {divs}")
+    # Never make more chunks than voxels along an axis
+    return [min(max(1, d), n) for d, n in zip(divs, shape)]
+
+
+def _chunk_bounds(shape, divs):
+    r"""Near-equal chunk boundaries per axis (sizes differ by at most 1)."""
+    return [(np.arange(d + 1) * n) // d for n, d in zip(shape, divs)]
+
+
+def _chunk_grid(shape, divs):
+    bounds = _chunk_bounds(shape, divs)
+    for idx in np.ndindex(*divs):
+        core = tuple(slice(int(b[i]), int(b[i + 1])) for b, i in zip(bounds, idx))
+        yield idx, core
+
+
+def _window(core, lo, hi, shape):
+    win = tuple(slice(max(0, c.start - int(l)), min(n, c.stop + int(h)))
+                for c, l, h, n in zip(core, lo, hi, shape))
+    core_in_win = tuple(slice(c.start - w.start, c.stop - w.start)
+                        for c, w in zip(core, win))
+    return win, core_in_win
+
+
+def _min_chunk_shape(shape, divs):
+    divs = _normalize_divs(divs, shape)
+    return np.array([np.diff(b).min() for b in _chunk_bounds(shape, divs)])
+
+
+def _sort_raster(coords, shape):
+    if len(coords) == 0:
+        return coords.reshape(0, len(shape)).astype(np.int64)
+    flat = np.ravel_multi_index(tuple(coords.T), shape)
+    return coords[np.argsort(flat, kind="stable")].astype(np.int64)
+
+
+def _connected_components(coords, connectivity):
+    r"""
+    Connected components of a sparse voxel set, in raster order of each
+    component's first voxel (the same order ``scipy.ndimage.label`` uses).
+
+    connectivity=1 -> face neighbours (ndimage.label default)
+    connectivity=ndim -> full neighbourhood (ps_rect(3, ndim))
+    ``coords`` must already be sorted in raster order.
+    """
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    n = len(coords)
+    if n == 0:
+        return np.empty(0, dtype=np.int64)
+    tree = sptl.cKDTree(coords)
+    if connectivity == 1:
+        pairs = tree.query_pairs(r=1, p=1, output_type="ndarray")
+    else:
+        pairs = tree.query_pairs(r=1, p=np.inf, output_type="ndarray")
+    adj = coo_matrix((np.ones(len(pairs), dtype=np.int8), (pairs[:, 0], pairs[:, 1])),
+                     shape=(n, n))
+    _, comp = connected_components(adj, directed=False)
+    # Renumber components by first appearance (coords are raster-sorted)
+    _, first = np.unique(comp, return_index=True)
+    order = np.argsort(first)
+    remap = np.empty_like(order)
+    remap[order] = np.arange(len(order))
+    return remap[comp]
+
+
+def _group_components(comp, n_groups):
+    r"""Round-robin assignment of clusters to groups (load balancing)."""
+    n_comp = int(comp.max()) + 1 if len(comp) else 0
+    if n_comp == 0:
+        return []
+    n_groups = max(1, min(n_groups, n_comp))
+    group_of_comp = np.arange(n_comp) % n_groups
+    vox_group = group_of_comp[comp]
+    groups = []
+    for g in range(n_groups):
+        vox_idx = np.nonzero(vox_group == g)[0]
+        uniq, local = np.unique(comp[vox_idx], return_inverse=True)
+        groups.append((vox_idx, local, len(uniq)))
+    return groups
+
+
+def _nearby_peaks_to_drop(crds, L, f=1):
+    r"""
+    Core of ``trim_nearby_peaks`` on sparse peak coordinates.
+
+    ``crds`` are integer peak coordinates (one per peak cluster) in raster
+    order, ``L`` the distance to solid at each. Returns indices of peaks to
+    drop. Ties in ``L`` are broken by position in ``crds`` (later wins),
+    which is independent of the number of peaks. (The previous additive
+    jiggle ``L + arange(N)*1e-6`` reached ~1 voxel for ~10^6 peaks and
+    could override real differences in ``L``.)
+    """
+    n = len(crds)
+    if n < 2:
+        return np.empty(0, dtype=np.int64)
+    tree = sptl.cKDTree(crds)
+    dist, nn = tree.query(crds, k=2)
+    nearest_neighbor = nn[:, 1]
+    dist_to_neighbor = dist[:, 1]
+    order = np.lexsort((np.arange(n), L))
+    rank = np.empty(n, dtype=np.int64)
+    rank[order] = np.arange(n)
+    hits = np.nonzero(dist_to_neighbor <= f * L)[0]
+    nbr = nearest_neighbor[hits]
+    drop = np.where(rank[hits] < rank[nbr], hits, nbr)
+    return np.unique(drop)
+
+
+def _global_markers(peaks, dt, shape, f=1):
+    r"""Sparse equivalent of trim_nearby_peaks + ndimage.label(ps_rect(3))."""
+    ndim = len(shape)
+    if len(peaks) == 0:
+        return np.empty((0, ndim), dtype=np.int64), np.empty(0, dtype=np.int32)
+    comp = _connected_components(peaks, connectivity=ndim)
+    n_comp = int(comp.max()) + 1
+    counts = np.bincount(comp, minlength=n_comp).astype(np.float64)
+    com = np.stack([np.bincount(comp, weights=peaks[:, ax].astype(np.float64),
+                                minlength=n_comp) / counts for ax in range(ndim)], axis=1)
+    crds = com.astype(int)
+    L = dt[tuple(crds.T)]
+    drop = _nearby_peaks_to_drop(crds, L, f=f)
+    keep = np.ones(n_comp, dtype=bool)
+    keep[drop] = False
+    new_label = np.cumsum(keep).astype(np.int32)  # raster order, 1..K
+    vox_keep = keep[comp]
+    return peaks[vox_keep], new_label[comp[vox_keep]]
+
+
+def _watershed_overlaps(dt, chunks, divs, min_overlap=None):
+    r"""
+    Variable per-face watershed overlap, same rule as before:
+    ceil(2 * max radius) over the chunk and its neighbour, where the radius
+    map is max-filtered over the 3x3x3 chunk neighbourhood. Faces on the
+    image boundary get no overlap.
+    """
+    ndim = dt.ndim
+    max_r = np.zeros(divs, dtype=np.float64)
+    for idx, core in chunks:
+        sub = dt[core]
+        max_r[idx] = sub.max() if sub.size else 0
+    max_r = spim.maximum_filter(max_r, size=3, mode="constant", cval=0)
+    min_overlap = int(min_overlap) if min_overlap else 0
+    out = {}
+    for idx, _ in chunks:
+        lo = np.zeros(ndim, dtype=np.int64)
+        hi = np.zeros(ndim, dtype=np.int64)
+        for ax in range(ndim):
+            for side, arr in ((-1, lo), (1, hi)):
+                nb = list(idx)
+                nb[ax] += side
+                if 0 <= nb[ax] < divs[ax]:
+                    r = max(max_r[idx], max_r[tuple(nb)])
+                    # Cap at the image extent: an image without any solid
+                    # has an infinite distance transform
+                    ov = 2 * r
+                    ov = int(np.ceil(ov)) if np.isfinite(ov) else dt.shape[ax]
+                    arr[ax] = min(max(ov, min_overlap), dt.shape[ax])
+        out[idx] = (lo, hi)
+    return out
+
+
+class _ChunkExecutor:
+    r"""
+    Runs chunk tasks on threads (local) or on a dask.distributed client
+    (e.g. SLURM). In distributed mode the distance transform is written
+    once to a shared .npy file and workers memory-map only what they need.
+    """
+
+    def __init__(self, dt, cores, directory="regions_npy_stack"):
+        self.cores = cores if cores else (os.cpu_count() or 1)
+        self.path = None
+        try:
+            self.client = dask.distributed.get_client()
+        except ValueError:
+            self.client = None
+        if self.client is not None:
+            self.n_slots = max(1, sum(self.client.nthreads().values()))
+        else:
+            self.n_slots = self.cores
+        if self.client is not None:
+            d = Path(os.getcwd()) / directory
+            os.makedirs(d, exist_ok=True)
+            self.path = d / "dt.npy"
+            np.save(self.path, dt)
+            self.src = str(self.path)
+        else:
+            self.src = dt
+
+    def map(self, fn, arg_tuples):
+        if self.client is not None:
+            futures = [self.client.submit(fn, self.src, *args, pure=False)
+                       for args in arg_tuples]
+            return self.client.gather(futures)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=self.cores) as ex:
+            return list(ex.map(lambda args: fn(self.src, *args), arg_tuples))
+
+    def close(self):
+        if self.path is not None:
+            try:
+                os.remove(self.path)
+            except OSError:
+                pass
+
+
+def _open_dt(src):
+    return np.load(src, mmap_mode="r") if isinstance(src, str) else src
+
+
+def _as_3d(arr):
+    return arr.reshape((1,) * (3 - arr.ndim) + arr.shape)
+
+
+def _task_candidate_peaks(src, win, core_in_win, r_max, sigma):
+    dt = np.asarray(_open_dt(src)[win])
+    ndim = dt.ndim
+    mask = dt > 0
+    if sigma > 0:
+        dt_blurred = spim.gaussian_filter(input=dt, sigma=sigma) * mask
+    else:
+        dt_blurred = np.copy(dt)
+    # Same footprint as find_peaks; peaks restricted to pore voxels (solid
+    # "peaks" are always removed by the saddle trimming anyway)
+    strel = ps_round(r=r_max, ndim=ndim)
+    offsets = np.argwhere(strel) - np.array(strel.shape) // 2
+    offsets = offsets[np.any(offsets != 0, axis=1)]
+    offsets = offsets[np.argsort((offsets**2).sum(axis=1), kind="stable")]
+    pad = 3 - ndim
+    offsets = np.hstack([np.zeros((len(offsets), pad), dtype=np.int64),
+                         offsets.astype(np.int64)])
+    c0 = np.array([0] * pad + [c.start for c in core_in_win], dtype=np.int64)
+    c1 = np.array([1] * pad + [c.stop for c in core_in_win], dtype=np.int64)
+    peaks = _nb_peaks_in_core(np.ascontiguousarray(_as_3d(dt_blurred)), offsets, c0, c1)
+    crd = np.argwhere(peaks.reshape(peaks.shape[pad:]))
+    crd += np.array([w.start + c.start for w, c in zip(win, core_in_win)])
+    return crd.astype(np.int64)
+
+
+def _task_trim_saddle(src, coords, comp_local, n_comp, maxiter):
+    r"""Runs the numba saddle kernel on a group of clusters.
+    Returns global linear indices of kept voxels (before intersection
+    with the candidate set)."""
+    dt = _open_dt(src)
+    if isinstance(dt, np.memmap):
+        dt = dt.view(np.ndarray)
+    ndim = dt.ndim
+    order = np.argsort(comp_local, kind="stable")
+    ptr = np.zeros(n_comp + 1, dtype=np.int64)
+    ptr[1:] = np.cumsum(np.bincount(comp_local, minlength=n_comp))
+    crd = coords[order].astype(np.int64)
+    if ndim < 3:
+        crd = np.hstack([np.zeros((len(crd), 3 - ndim), dtype=np.int64), crd])
+    # Linear indices are identical for the 3D view of a 2D array
+    return _nb_trim_saddle(_as_3d(dt), crd, ptr, int(maxiter))
+
+
+def _task_watershed(src, win, core_in_win, marker_coords, marker_labels,
+                    mask_watershed=False):
+    dt = np.asarray(_open_dt(src)[win])
+    mask = dt > 0
+    if len(marker_labels) == 0:
+        return mask[core_in_win].astype(np.int32)
+    markers = np.zeros(dt.shape, dtype=np.int32)
+    markers[tuple(marker_coords.T)] = marker_labels
+    regions = watershed(image=-dt, markers=markers,
+                        mask=mask if mask_watershed else None)
+    return (regions[core_in_win] * mask[core_in_win]).astype(np.int32)
+
 
 @nb.njit(cache=True)
 def _get_chunks_overlaps(max_radii_map):
@@ -1373,3 +1636,183 @@ class Divisible:
 
     def make_original_shape(self, im):
         return im[tuple(slice(0, s) for s in self.original_shape)]
+
+
+# ---------------------------------------------------------------------------
+# Numba kernels (nogil, serial). Parallelism comes from running several
+# kernel calls concurrently on threads (they release the GIL) or on dask
+# workers. parallel=True is deliberately avoided: concurrent calls into
+# numba's default "workqueue" threading layer from several Python threads
+# or dask worker threads are not thread-safe.
+# ---------------------------------------------------------------------------
+
+@nb.njit(nogil=True, cache=True)
+def _nb_peaks_in_core(blurred, offsets, c0, c1):
+    r"""
+    Peak test of ``find_peaks`` (``dt == maximum_filter(dt, footprint)``)
+    for pore voxels (``blurred > 0``) inside the core ``[c0, c1)``.
+
+    A voxel is a peak iff no voxel under the footprint is strictly larger.
+    Offsets are sorted nearest-first so most voxels exit after a few reads.
+    Out-of-bounds neighbours are skipped: under scipy's default 'reflect'
+    mode a reflected neighbour of a ball footprint always lands inside the
+    same footprint, so skipping gives the identical result.
+    """
+    Z, Y, X = blurred.shape
+    out = np.zeros((c1[0] - c0[0], c1[1] - c0[1], c1[2] - c0[2]), dtype=np.bool_)
+    n_off = offsets.shape[0]
+    for z in range(c0[0], c1[0]):
+        for y in range(c0[1], c1[1]):
+            for x in range(c0[2], c1[2]):
+                v = blurred[z, y, x]
+                if v <= 0:
+                    continue
+                is_peak = True
+                for k in range(n_off):
+                    zz = z + offsets[k, 0]
+                    yy = y + offsets[k, 1]
+                    xx = x + offsets[k, 2]
+                    if zz < 0 or zz >= Z or yy < 0 or yy >= Y or xx < 0 or xx >= X:
+                        continue
+                    if blurred[zz, yy, xx] > v:
+                        is_peak = False
+                        break
+                out[z - c0[0], y - c0[1], x - c0[2]] = is_peak
+    return out
+
+
+@nb.njit(nogil=True, cache=True)
+def _nb_trim_saddle(dt, coords, ptr, maxiter):
+    r"""
+    Per-cluster loop of ``trim_saddle_points`` on sparse voxel sets.
+
+    ``coords`` holds the voxels of all clusters, grouped: cluster ``c`` is
+    ``coords[ptr[c]:ptr[c+1]]``. Returns the global linear indices of the
+    final ``peaks_i`` of every cluster classified as a true peak (the
+    caller intersects them with the candidate set, i.e. ``new_peaks*peaks``).
+
+    Instead of dilating a dense box each iteration, the current set is kept
+    as a list and its 3x3x3 dilation is built from the neighbours of its
+    voxels, deduplicated with stamp arrays (no clearing between clusters).
+    The dilation can never leave ``bbox +/- maxiter``, which is exactly the
+    ``extend_slice(..., pad=maxiter)`` box of the original, so the result is
+    identical.
+    """
+    Z, Y, X = dt.shape
+    n_cl = ptr.shape[0] - 1
+
+    # Size the reusable buffers for the largest box
+    max_box = 1
+    for c in range(n_cl):
+        lo0 = Z; lo1 = Y; lo2 = X; hi0 = 0; hi1 = 0; hi2 = 0
+        for i in range(ptr[c], ptr[c + 1]):
+            lo0 = min(lo0, coords[i, 0]); hi0 = max(hi0, coords[i, 0] + 1)
+            lo1 = min(lo1, coords[i, 1]); hi1 = max(hi1, coords[i, 1] + 1)
+            lo2 = min(lo2, coords[i, 2]); hi2 = max(hi2, coords[i, 2] + 1)
+        b = ((min(Z, hi0 + maxiter) - max(0, lo0 - maxiter))
+             * (min(Y, hi1 + maxiter) - max(0, lo1 - maxiter))
+             * (min(X, hi2 + maxiter) - max(0, lo2 - maxiter)))
+        max_box = max(max_box, b)
+
+    dmark = np.zeros(max_box, dtype=np.int64)   # membership in dilation
+    cmark = np.zeros(max_box, dtype=np.int64)   # membership in current set
+    cur = np.empty(max_box, dtype=np.int64)
+    nxt = np.empty(max_box, dtype=np.int64)
+    dil = np.empty(max_box, dtype=np.int64)
+    dstamp = 0
+    cstamp = 0
+
+    out = np.empty(max(16, coords.shape[0]), dtype=np.int64)
+    n_out = 0
+
+    for c in range(n_cl):
+        lo0 = Z; lo1 = Y; lo2 = X; hi0 = 0; hi1 = 0; hi2 = 0
+        for i in range(ptr[c], ptr[c + 1]):
+            lo0 = min(lo0, coords[i, 0]); hi0 = max(hi0, coords[i, 0] + 1)
+            lo1 = min(lo1, coords[i, 1]); hi1 = max(hi1, coords[i, 1] + 1)
+            lo2 = min(lo2, coords[i, 2]); hi2 = max(hi2, coords[i, 2] + 1)
+        b0 = max(0, lo0 - maxiter); e0 = min(Z, hi0 + maxiter)
+        b1 = max(0, lo1 - maxiter); e1 = min(Y, hi1 + maxiter)
+        b2 = max(0, lo2 - maxiter); e2 = min(X, hi2 + maxiter)
+        s0 = e0 - b0; s1 = e1 - b1; s2 = e2 - b2
+
+        cstamp += 1
+        ncur = 0
+        for i in range(ptr[c], ptr[c + 1]):
+            u = ((coords[i, 0] - b0) * s1 + (coords[i, 1] - b1)) * s2 + (coords[i, 2] - b2)
+            if cmark[u] != cstamp:
+                cmark[u] = cstamp
+                cur[ncur] = u
+                ncur += 1
+
+        for _ in range(maxiter):
+            # 3x3x3 dilation of the current set, clipped to the box
+            dstamp += 1
+            ndil = 0
+            for j in range(ncur):
+                u = cur[j]
+                z = u // (s1 * s2)
+                y = (u // s2) % s1
+                x = u % s2
+                for dz in range(-1, 2):
+                    zz = z + dz
+                    if zz < 0 or zz >= s0:
+                        continue
+                    for dy in range(-1, 2):
+                        yy = y + dy
+                        if yy < 0 or yy >= s1:
+                            continue
+                        for dx in range(-1, 2):
+                            xx = x + dx
+                            if xx < 0 or xx >= s2:
+                                continue
+                            w = (zz * s1 + yy) * s2 + xx
+                            if dmark[w] != dstamp:
+                                dmark[w] = dstamp
+                                dil[ndil] = w
+                                ndil += 1
+            # Max of dt over the dilation (dt >= 0, so 0 is the floor, as
+            # in np.amax(dt_i * peaks_dil))
+            m = dt[b0, b1, b2] * 0
+            for j in range(ndil):
+                w = dil[j]
+                val = dt[b0 + w // (s1 * s2), b1 + (w // s2) % s1, b2 + w % s2]
+                if val > m:
+                    m = val
+            # peaks_extended: voxels of the dilation equal to the max, in pore
+            nnext = 0
+            overlap = 0
+            for j in range(ndil):
+                w = dil[j]
+                val = dt[b0 + w // (s1 * s2), b1 + (w // s2) % s1, b2 + w % s2]
+                if val == m and val > 0:
+                    nxt[nnext] = w
+                    nnext += 1
+                    if cmark[w] == cstamp:
+                        overlap += 1
+            if nnext == ncur and overlap == ncur:
+                # True peak: emit the current set
+                if n_out + ncur > out.shape[0]:
+                    new = np.empty(2 * out.shape[0] + ncur, dtype=np.int64)
+                    new[:n_out] = out[:n_out]
+                    out = new
+                for j in range(ncur):
+                    u = cur[j]
+                    gz = b0 + u // (s1 * s2)
+                    gy = b1 + (u // s2) % s1
+                    gx = b2 + u % s2
+                    out[n_out] = (gz * Y + gy) * X + gx
+                    n_out += 1
+                break
+            elif overlap == 0:
+                break  # saddle point
+            # Keep walking along the plateau
+            tmp = cur
+            cur = nxt
+            nxt = tmp
+            ncur = nnext
+            cstamp += 1
+            for j in range(ncur):
+                cmark[cur[j]] = cstamp
+        # maxiter reached without a decision: dropped (as in the original)
+    return out[:n_out]
