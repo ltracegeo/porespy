@@ -199,15 +199,17 @@ def _masked_watershed(dt, markers, mask):
         regions = np.zeros(mask.shape, dtype=int)
     else:
         regions = watershed(image=-dt, markers=markers, mask=mask)
-    unmarked = mask & (regions == 0)
+    unmarked = (mask & (regions == 0)).astype(np.int32)
     if unmarked.any():
-        extra, N = spim.label(unmarked)
-        logger.debug(f"Labeling {N} pore components without markers")
+        N = spim.label(unmarked, output=unmarked)
         offset = max(regions.max(), markers.max())
-        regions[unmarked] = extra[unmarked] + offset
-        positions = spim.maximum_position(dt, labels=extra, index=np.arange(1, N + 1))
-        markers = markers.copy()
-        markers[tuple(np.array(positions, dtype=int).T)] = np.arange(1, N + 1) + offset
+        _add_labels(regions, unmarked, offset)
+        positions = spim.maximum_position(dt, labels=unmarked, index=np.arange(1, N + 1))
+        _update_markers(
+            markers_array=markers, 
+            marker_positions=positions, 
+            marker_indexes=np.arange(1+offset, N+1+offset),
+            )
     return regions, markers
 
 
