@@ -2,6 +2,7 @@ import numpy as np
 import openpnm as op
 import scipy.ndimage as spim
 from scipy import stats as spst
+from skimage.segmentation import watershed
 
 import porespy as ps
 
@@ -403,6 +404,35 @@ class Snow2Test:
             # No pore voxel may be left unlabeled
             assert np.all((regions > 0) == im[tuple(slice(0, s) for s in regions.shape)])
 
+
+    def test_masked_watershed_labels_unmarked_components(self):
+        from porespy.filters._snows import _masked_watershed
+        rng = np.random.default_rng(0)
+        for shape in [(60, 70), (30, 35, 40)]:
+            im = spim.binary_opening(rng.random(shape) > 0.45)
+            # Random dt avoids ties, so maximum positions are unique
+            dt = (edt(im) + rng.random(shape) * 1e-3) * im
+            markers = np.zeros(shape, dtype=np.int32)
+            n = 4
+            idx = rng.choice(np.flatnonzero(im), n, replace=False)
+            markers.flat[idx] = np.arange(1, n + 1)
+            # Reference: previous implementation using scipy
+            ref_regions = watershed(-dt, markers=markers, mask=im)
+            unmarked = im & (ref_regions == 0)
+            extra, N = spim.label(unmarked)
+            ref_regions[unmarked] = extra[unmarked] + n
+            ref_markers = markers.copy()
+            pos = spim.maximum_position(dt, labels=extra, index=np.arange(1, N + 1))
+            ref_markers[tuple(np.array(pos, dtype=int).T)] = np.arange(1, N + 1) + n
+            assert N > 0
+            regions, new_markers = _masked_watershed(dt, markers.copy(), im)
+            np.testing.assert_array_equal(regions, ref_regions)
+            np.testing.assert_array_equal(new_markers, ref_markers)
+            # Without markers, each face connected component is a region
+            regions, new_markers = _masked_watershed(dt, None, im)
+            labels, N = spim.label(im)
+            np.testing.assert_array_equal(regions, labels)
+            assert (new_markers > 0).sum() == N
 
 if __name__ == "__main__":
     t = Snow2Test()

@@ -193,24 +193,90 @@ def _masked_watershed(dt, markers, mask):
         The input markers plus one marker for each newly labeled component,
         using the same label as its region.
     """
-    mask = mask > 0
+    if mask.dtype != bool:
+        mask = mask > 0
     if markers is None:
-        markers = np.zeros(mask.shape, dtype=int)
-        regions = np.zeros(mask.shape, dtype=int)
+        markers = np.zeros(mask.shape, dtype=np.int32)
+        regions = np.zeros(mask.shape, dtype=np.int32)
     else:
         regions = watershed(image=-dt, markers=markers, mask=mask)
-    unmarked = (mask & (regions == 0)).astype(np.int32)
-    if unmarked.any():
-        N = spim.label(unmarked, output=unmarked)
-        offset = max(regions.max(), markers.max())
-        _add_labels(regions, unmarked, offset)
-        positions = spim.maximum_position(dt, labels=unmarked, index=np.arange(1, N + 1))
-        _update_markers(
-            markers_array=markers, 
-            marker_positions=positions, 
-            marker_indexes=np.arange(1+offset, N+1+offset),
-            )
+    # Watershed only outputs marker labels, so regions.max() <= markers.max()
+    offset = int(markers.max())
+    if mask.ndim == 2:
+        _label_unmarked(regions[None], markers[None], mask[None], dt[None], offset)
+    else:
+        _label_unmarked(regions, markers, mask, dt, offset)
     return regions, markers
+
+
+@nb.njit(cache=True, nogil=True)
+def _label_unmarked(regions, markers, mask, dt, offset):
+    r"""
+    Labels the face connected components of ``mask & (regions == 0)`` in
+    place, starting at ``offset + 1`` in raster order (same numbering as
+    ``scipy.ndimage.label``), and places a marker with the same label at the
+    distance transform maximum of each component (lowest raster index on
+    ties). Only one pass over the whole image is done, the remaining work is
+    proportional to the number of unmarked voxels.
+
+    Returns the number of new labels.
+    """
+    nz, ny, nx = regions.shape
+    syz = ny * nx
+    stack = np.empty(64, dtype=np.int64)
+    label = offset
+    for i in range(nz):
+        for j in range(ny):
+            for k in range(nx):
+                if not mask[i, j, k] or regions[i, j, k] != 0:
+                    continue
+                label += 1
+                regions[i, j, k] = label
+                best = i * syz + j * nx + k
+                best_value = dt[i, j, k]
+                stack[0] = best
+                top = 1
+                while top > 0:
+                    top -= 1
+                    idx = stack[top]
+                    ci = idx // syz
+                    rem = idx - ci * syz
+                    cj = rem // nx
+                    ck = rem - cj * nx
+                    value = dt[ci, cj, ck]
+                    if value > best_value or (value == best_value and idx < best):
+                        best = idx
+                        best_value = value
+                    for d in range(6):
+                        ni, nj, nk = ci, cj, ck
+                        if d == 0:
+                            ni -= 1
+                        elif d == 1:
+                            ni += 1
+                        elif d == 2:
+                            nj -= 1
+                        elif d == 3:
+                            nj += 1
+                        elif d == 4:
+                            nk -= 1
+                        else:
+                            nk += 1
+                        if ni < 0 or ni >= nz or nj < 0 or nj >= ny or nk < 0 or nk >= nx:
+                            continue
+                        if not mask[ni, nj, nk] or regions[ni, nj, nk] != 0:
+                            continue
+                        regions[ni, nj, nk] = label
+                        if top == stack.shape[0]:
+                            new_stack = np.empty(2 * top, dtype=np.int64)
+                            new_stack[:top] = stack
+                            stack = new_stack
+                        stack[top] = ni * syz + nj * nx + nk
+                        top += 1
+                bi = best // syz
+                rem = best - bi * syz
+                bj = rem // nx
+                markers[bi, bj, rem - bj * nx] = label
+    return label - offset
 
 
 def snow_partitioning_n(im, r_max=4, sigma=0.4, peaks=None):
