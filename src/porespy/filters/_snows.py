@@ -145,20 +145,70 @@ def snow_partitioning(im, dt=None, r_max=4, sigma=0.4, peaks=None, mask_watershe
             peaks = trim_nearby_peaks(peaks=peaks, dt=dt)
             logger.debug(f"Peaks after trimming nearby points: {spim.label(peaks)[1]}")
             peaks, N = spim.label(peaks > 0, structure=ps_rect(3, dt.ndim))
-            regions = watershed(image=-dt, markers=peaks,
-                                mask=im if mask_watershed else None)
+            regions, peaks = _masked_watershed(dt=dt, markers=peaks, mask=im)
         else:
-            regions = np.ones_like(dt_blurred)
+            regions, peaks = _masked_watershed(dt=dt, markers=None, mask=im)
     else:
         peaks, N = spim.label(peaks > 0, structure=ps_rect(3, im.ndim))
-        regions = watershed(image=-dt, markers=peaks,
-                            mask=im if mask_watershed else None)
+        regions, peaks = _masked_watershed(dt=dt, markers=peaks, mask=im)
     tup = Results()
     tup.im = im
     tup.dt = dt
     tup.peaks = peaks
     tup.regions = regions * (im > 0)
     return tup
+
+
+def _masked_watershed(dt, markers, mask):
+    r"""
+    Marker-based watershed of ``-dt`` restricted to ``mask``.
+
+    Flooding is not allowed to cross voxels outside ``mask`` (i.e. the solid),
+    so every resulting region is a connected subset of the pore space. Without
+    the mask, a region could flood through the solid and claim voxels in
+    unconnected pores, which then remain under the same label after masking.
+
+    Pore components that received no marker (e.g. small isolated pores whose
+    peak was removed by ``trim_nearby_peaks`` in favor of a peak across the
+    solid) are left unlabeled by the masked watershed, so each one is given
+    its own new label and a marker at its distance transform maximum. These
+    components use face connectivity, the same one used by the watershed
+    flooding.
+
+    Parameters
+    ----------
+    dt : ndarray
+        The distance transform of the pore space.
+    markers : ndarray or None
+        Labeled markers. If ``None``, each connected component of ``mask``
+        becomes a single region.
+    mask : ndarray
+        Boolean image of the pore space.
+
+    Returns
+    -------
+    regions : ndarray
+        Labeled regions, with ``0`` outside ``mask``.
+    markers : ndarray
+        The input markers plus one marker for each newly labeled component,
+        using the same label as its region.
+    """
+    mask = mask > 0
+    if markers is None:
+        markers = np.zeros(mask.shape, dtype=int)
+        regions = np.zeros(mask.shape, dtype=int)
+    else:
+        regions = watershed(image=-dt, markers=markers, mask=mask)
+    unmarked = mask & (regions == 0)
+    if unmarked.any():
+        extra, N = spim.label(unmarked)
+        logger.debug(f"Labeling {N} pore components without markers")
+        offset = max(regions.max(), markers.max())
+        regions[unmarked] = extra[unmarked] + offset
+        positions = spim.maximum_position(dt, labels=extra, index=np.arange(1, N + 1))
+        markers = markers.copy()
+        markers[tuple(np.array(positions, dtype=int).T)] = np.arange(1, N + 1) + offset
+    return regions, markers
 
 
 def snow_partitioning_n(im, r_max=4, sigma=0.4, peaks=None):
@@ -1604,10 +1654,10 @@ def _snow_chunked(dt, r_max=5, sigma=0.4):
     if len(peaks) > 0:
         peaks = trim_nearby_peaks(peaks=peaks, dt=dt)
         peaks, N = spim.label(peaks > 0, structure=ps_rect(3, dt.ndim))
-        regions = watershed(image=-dt, markers=peaks)
+        regions, _ = _masked_watershed(dt=dt, markers=peaks, mask=mask)
     else:
-        regions = np.ones_like(dt_blurred)
-    return regions * mask
+        regions, _ = _masked_watershed(dt=dt, markers=None, mask=mask)
+    return regions
 
 
 class Divisible:

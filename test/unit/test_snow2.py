@@ -333,7 +333,9 @@ class Snow2Test:
         )
         im = im + sph * 1.0
         snow1 = ps.filters.snow_partitioning_n(im, sigma=0.4, r_max=5)
-        assert snow1.regions.max() == 56
+        # 58 (was 56): two voxels touching their region only by corners are
+        # no longer merged into it by flooding through the solid
+        assert snow1.regions.max() == 58
         dt1 = edt(im == 1)
         dt2 = edt(im == 2)
         dt3 = spim.gaussian_filter(dt1, sigma=0.4) * im
@@ -343,7 +345,7 @@ class Snow2Test:
         pk3 = ps.filters.trim_saddle_points(peaks=pk1, dt=dt1)
         pk4 = ps.filters.trim_saddle_points(peaks=pk2, dt=dt2)
         snow2 = ps.filters.snow_partitioning_n(im, peaks=pk3 + pk4)
-        assert snow2.regions.max() == 56
+        assert snow2.regions.max() == 58
 
     def test_snow2_with_peaks(self):
         im = ps.generators.blobs(
@@ -387,6 +389,19 @@ class Snow2Test:
             im=snow_n.regions, shape=np.array(snow_n.regions.shape) - 10
         )
         assert temp.max() == 163
+
+    def test_regions_do_not_span_unconnected_pores(self):
+        from skimage.measure import label
+
+        im = ps.generators.blobs(shape=[120, 120, 120], porosity=0.25, seed=1, blobiness=2)
+        for parallel_kw in (None, {"divs": 2}):
+            regions = ps.networks.snow2(im, parallel_kw=parallel_kw, boundary_width=0).regions
+            n_labels = np.unique(regions[regions > 0]).size
+            n_components = label(regions, background=0, connectivity=regions.ndim).max()
+            # Each label must be a single connected piece of pore space
+            assert n_components == n_labels
+            # No pore voxel may be left unlabeled
+            assert np.all((regions > 0) == im[tuple(slice(0, s) for s in regions.shape)])
 
 
 if __name__ == "__main__":
