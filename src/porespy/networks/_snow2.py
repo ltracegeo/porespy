@@ -276,6 +276,7 @@ def snow2(
             accuracy=accuracy,
             voxel_size=voxel_size,
             porosity_map=porosity_map,
+            force_cpu=force_cpu,
         )
     else:
         net = regions_to_network(
