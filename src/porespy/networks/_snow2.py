@@ -45,7 +45,6 @@ def snow2(
     parallel_kw={},
     parallel_extraction=False,
     force_cpu=False,
-    mask_watershed=False,
 ):
     r"""
     Applies the SNOW algorithm to each phase indicated in ``phases``.
@@ -152,12 +151,6 @@ def snow2(
                    serial to minimize memory usage.
         ========== ============================================================
 
-    mask_watershed : bool
-        If True the watershed of each phase floods only that phase. Several
-        times faster, especially for minority phases; pore components with
-        no marker are left unlabelled instead of being merged into an
-        unrelated pore through the other phases. Default False (legacy).
-
     Returns
     -------
     network : Results object
@@ -246,7 +239,6 @@ def snow2(
                 r_max=r_max,
                 parallel_kw=parallel_kw,
                 dt=dt,
-                mask_watershed=mask_watershed,
             )
         else:
             snow = snow_partitioning(
@@ -255,7 +247,6 @@ def snow2(
                 sigma=sigma[i],
                 r_max=r_max,
                 peaks=pk,
-                mask_watershed=mask_watershed,
                 )
         del dt
         if regions is None:

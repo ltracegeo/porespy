@@ -44,7 +44,7 @@ tqdm = get_tqdm()
 logger = logging.getLogger(__name__)
 
 
-def snow_partitioning(im, dt=None, r_max=4, sigma=0.4, peaks=None, mask_watershed=False):
+def snow_partitioning(im, dt=None, r_max=4, sigma=0.4, peaks=None):
     r"""
     Partition the void space into pore regions using a marker-based
     watershed algorithm
@@ -75,11 +75,6 @@ def snow_partitioning(im, dt=None, r_max=4, sigma=0.4, peaks=None, mask_watershe
         This allows for comparison of peak finding algorithms for instance.
         If this argument is provided, then ``r_max`` and ``sigma`` are ignored
         since these are specfically used in the peak finding process.
-    mask_watershed : bool
-        If True the watershed floods only the phase of interest. This is
-        several times faster (the solid is not flooded) and pore components
-        without any marker are left as 0 instead of receiving the label of
-        an unrelated pore through the solid. Default False (legacy result).
 
     Returns
     -------
@@ -202,28 +197,31 @@ def _masked_watershed(dt, markers, mask):
         regions = watershed(image=-dt, markers=markers, mask=mask)
     # Watershed only outputs marker labels, so regions.max() <= markers.max()
     offset = int(markers.max())
-    if mask.ndim == 2:
-        _label_unmarked(regions[None], markers[None], mask[None], dt[None], offset)
-    else:
-        _label_unmarked(regions, markers, mask, dt, offset)
+    new_markers = _label_unmarked(_as_3d(regions), _as_3d(mask), _as_3d(dt), offset)
+    if len(new_markers) > 0:
+        markers[np.unravel_index(new_markers, markers.shape)] = np.arange(
+            offset + 1, offset + 1 + len(new_markers))
     return regions, markers
 
 
 @nb.njit(cache=True, nogil=True)
-def _label_unmarked(regions, markers, mask, dt, offset):
+def _label_unmarked(regions, mask, dt, offset):
     r"""
     Labels the face connected components of ``mask & (regions == 0)`` in
     place, starting at ``offset + 1`` in raster order (same numbering as
-    ``scipy.ndimage.label``), and places a marker with the same label at the
-    distance transform maximum of each component (lowest raster index on
-    ties). Only one pass over the whole image is done, the remaining work is
-    proportional to the number of unmarked voxels.
+    ``scipy.ndimage.label``), and finds the distance transform maximum of
+    each component (lowest raster index on ties). Only one pass over the
+    whole image is done, the remaining work is proportional to the number of
+    unmarked voxels.
 
-    Returns the number of new labels.
+    Returns the raster (linear) index of the maximum of each new label, in
+    label order, so new label ``offset + 1 + n`` has its marker at index
+    ``n`` of the result.
     """
     nz, ny, nx = regions.shape
     syz = ny * nx
     stack = np.empty(64, dtype=np.int64)
+    found = np.empty(16, dtype=np.int64)
     label = offset
     for i in range(nz):
         for j in range(ny):
@@ -272,11 +270,83 @@ def _label_unmarked(regions, markers, mask, dt, offset):
                             stack = new_stack
                         stack[top] = ni * syz + nj * nx + nk
                         top += 1
-                bi = best // syz
-                rem = best - bi * syz
-                bj = rem // nx
-                markers[bi, bj, rem - bj * nx] = label
-    return label - offset
+                n = label - offset - 1
+                if n == found.shape[0]:
+                    new_found = np.empty(2 * n, dtype=np.int64)
+                    new_found[:n] = found
+                    found = new_found
+                found[n] = best
+    return found[:label - offset]
+
+
+@nb.njit(cache=True, nogil=True)
+def _clear_unseeded_pieces(regions, seeds):
+    r"""
+    Keeps, for each label of ``regions``, only the face connected pieces that
+    contain at least one seed of that label, setting all other labelled voxels
+    to 0 in place. ``seeds`` are raster (linear) indices of the marker voxels.
+
+    Returns the number of cleared voxels.
+    """
+    nz, ny, nx = regions.shape
+    syz = ny * nx
+    stack = np.empty(64, dtype=np.int64)
+    # Visited voxels are flagged by negating their label
+    for s in range(seeds.shape[0]):
+        idx = seeds[s]
+        si = idx // syz
+        rem = idx - si * syz
+        sj = rem // nx
+        sk = rem - sj * nx
+        value = regions[si, sj, sk]
+        if value <= 0:
+            continue
+        regions[si, sj, sk] = -value
+        stack[0] = idx
+        top = 1
+        while top > 0:
+            top -= 1
+            idx = stack[top]
+            ci = idx // syz
+            rem = idx - ci * syz
+            cj = rem // nx
+            ck = rem - cj * nx
+            for d in range(6):
+                ni, nj, nk = ci, cj, ck
+                if d == 0:
+                    ni -= 1
+                elif d == 1:
+                    ni += 1
+                elif d == 2:
+                    nj -= 1
+                elif d == 3:
+                    nj += 1
+                elif d == 4:
+                    nk -= 1
+                else:
+                    nk += 1
+                if ni < 0 or ni >= nz or nj < 0 or nj >= ny or nk < 0 or nk >= nx:
+                    continue
+                if regions[ni, nj, nk] != value:
+                    continue
+                regions[ni, nj, nk] = -value
+                if top == stack.shape[0]:
+                    new_stack = np.empty(2 * top, dtype=np.int64)
+                    new_stack[:top] = stack
+                    stack = new_stack
+                stack[top] = ni * syz + nj * nx + nk
+                top += 1
+    cleared = 0
+    for i in range(nz):
+        for j in range(ny):
+            for k in range(nx):
+                value = regions[i, j, k]
+                if value > 0:
+                    regions[i, j, k] = 0
+                    cleared += 1
+                elif value < 0:
+                    regions[i, j, k] = -value
+    return cleared
 
 
 def snow_partitioning_n(im, r_max=4, sigma=0.4, peaks=None):
@@ -752,7 +822,6 @@ def snow_partitioning_parallel(im,
                                cores=None,
                                dt=None,
                                maxiter=20,
-                               mask_watershed=False,
                                ):
     r"""
     Performs the SNOW algorithm by geometric domain decomposition, with
@@ -774,10 +843,16 @@ def snow_partitioning_parallel(im,
     4. Nearby-peak trimming and marker labelling (global, sparse): done on
        peak coordinates only (KD-tree), so it is cheap even for large
        volumes. Markers are labelled once, globally, in raster order.
-    5. Watershed (chunked): each chunk floods ``-dt`` with the global
-       markers that fall inside its window (variable overlap, as before)
-       and keeps only its core. Labels are already global, so there is no
-       relabelling or stitching step.
+    5. Watershed (chunked): each chunk floods ``-dt``, restricted to the
+       phase of interest, with the global markers that fall inside its
+       window (variable overlap, as before) and keeps only its core. Labels
+       are already global, so there is no relabelling or stitching step.
+    6. Disconnected pieces and unmarked components (global): a chunk only
+       keeps its core, so a basin that is connected inside the chunk window
+       may be split once cropped. Pieces of a label that do not contain any
+       of its markers are cleared, and every pore voxel not reached by a
+       marker gets a new label per face connected component, with a marker
+       at its distance transform maximum (see ``_masked_watershed``).
 
     Only step 5 can differ from serial ``snow_partitioning``, and only where
     a basin extends beyond a chunk's window. Chunks have near-equal sizes,
@@ -803,8 +878,6 @@ def snow_partitioning_parallel(im,
     maxiter : int
         Passed to the saddle-point trimming (same meaning as in
         ``trim_saddle_points``).
-    mask_watershed : bool
-        Flood only the phase of interest (see ``snow_partitioning``).
 
     Returns
     -------
@@ -876,7 +949,7 @@ def snow_partitioning_parallel(im,
                 inside &= (marker_coords[:, ax] >= w.start) & (marker_coords[:, ax] < w.stop)
             start = np.array([w.start for w in win])
             tasks.append((win, core_in_win, marker_coords[inside] - start,
-                          marker_labels[inside], mask_watershed))
+                          marker_labels[inside]))
         cores_out = executor.map(_task_watershed, tasks)
     finally:
         executor.close()
@@ -884,6 +957,22 @@ def snow_partitioning_parallel(im,
     regions = np.zeros(im.shape, dtype=np.int32)
     for (_, core), out in zip(chunks, cores_out):
         regions[core] = out
+
+    # Step 6: clear label pieces cut off from their markers by the chunk
+    # cropping, then give every unreached pore component its own label
+    seeds = np.ravel_multi_index(tuple(marker_coords.T), im.shape).astype(np.int64)
+    n_cleared = _clear_unseeded_pieces(_as_3d(regions), seeds)
+    if n_cleared > 0:
+        logger.info(f"Cleared {n_cleared} voxels disconnected from their markers")
+    new_markers = _label_unmarked(_as_3d(regions), _as_3d(im), _as_3d(dt), n_markers)
+    if len(new_markers) > 0:
+        logger.info(f"Labelled {len(new_markers)} pore components without markers")
+        new_coords = np.stack(np.unravel_index(new_markers, im.shape), axis=1)
+        marker_coords = np.concatenate([marker_coords, new_coords.astype(marker_coords.dtype)])
+        marker_labels = np.concatenate([
+            marker_labels,
+            np.arange(n_markers + 1, n_markers + 1 + len(new_markers), dtype=marker_labels.dtype),
+        ])
 
     tup = Results()
     tup.im = im
@@ -1161,17 +1250,15 @@ def _task_trim_saddle(src, coords, comp_local, n_comp, maxiter):
     return _nb_trim_saddle(_as_3d(dt), crd, ptr, int(maxiter))
 
 
-def _task_watershed(src, win, core_in_win, marker_coords, marker_labels,
-                    mask_watershed=False):
+def _task_watershed(src, win, core_in_win, marker_coords, marker_labels):
     dt = np.asarray(_open_dt(src)[win])
-    mask = dt > 0
     if len(marker_labels) == 0:
-        return mask[core_in_win].astype(np.int32)
+        # Unmarked pore voxels are labelled globally afterwards
+        return np.zeros(dt[core_in_win].shape, dtype=np.int32)
     markers = np.zeros(dt.shape, dtype=np.int32)
     markers[tuple(marker_coords.T)] = marker_labels
-    regions = watershed(image=-dt, markers=markers,
-                        mask=mask if mask_watershed else None)
-    return (regions[core_in_win] * mask[core_in_win]).astype(np.int32)
+    regions = watershed(image=-dt, markers=markers, mask=dt > 0)
+    return regions[core_in_win].astype(np.int32)
 
 
 @nb.njit(cache=True)
