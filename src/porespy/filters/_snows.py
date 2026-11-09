@@ -131,14 +131,19 @@ def snow_partitioning(im, dt=None, r_max=4, sigma=0.4, peaks=None):
             dt_blurred = spim.gaussian_filter(input=dt, sigma=sigma)*im
         else:
             dt_blurred = np.copy(dt)
-        peaks = find_peaks(dt=dt_blurred, r_max=r_max)
+        peaks = _find_pore_peaks(dt_blurred, r_max=r_max)
 
-        logger.debug(f"Initial number of peaks: {spim.label(peaks)[1]}")
+        # Counting peaks labels the whole image, so only do it when it is logged
+        debug = logger.isEnabledFor(logging.DEBUG)
+        if debug:
+            logger.debug(f"Initial number of peaks: {spim.label(peaks)[1]}")
         peaks = trim_saddle_points(peaks=peaks, dt=dt)
-        logger.debug(f"Peaks after trimming saddle points: {spim.label(peaks)[1]}")
+        if debug:
+            logger.debug(f"Peaks after trimming saddle points: {spim.label(peaks)[1]}")
         if len(peaks) > 0:
             peaks = trim_nearby_peaks(peaks=peaks, dt=dt)
-            logger.debug(f"Peaks after trimming nearby points: {spim.label(peaks)[1]}")
+            if debug:
+                logger.debug(f"Peaks after trimming nearby points: {spim.label(peaks)[1]}")
             peaks, N = spim.label(peaks > 0, structure=ps_rect(3, dt.ndim))
             regions, peaks = _masked_watershed(dt=dt, markers=peaks, mask=im)
         else:
@@ -627,34 +632,40 @@ def trim_saddle_points(peaks, dt, maxiter=20):
     to view online example.
 
     """
-    new_peaks = np.zeros_like(peaks, dtype=bool)
-    strel = footprint_rectangle((3,) * dt.ndim)
+    # Each face connected peak cluster is walked uphill along its plateau of
+    # the distance transform: it is kept if it is a true peak, dropped if it
+    # is a saddle point or if no decision is reached within maxiter steps.
+    # The per-cluster loop runs in the numba kernel _nb_trim_saddle, which
+    # gives the same result as dilating a dense box around each cluster but
+    # does not pay a Python iteration and a full box dilation per cluster.
+    new_peaks = np.zeros(peaks.size, dtype=bool)
     labels, N = spim.label(peaks > 0)
-    slices = spim.find_objects(labels)
-    desc = inspect.currentframe().f_code.co_name  # Get current func name
-    for i, s in tqdm(enumerate(slices), desc=desc, **settings.tqdm):
-        sx = extend_slice(s, shape=peaks.shape, pad=maxiter)
-        peaks_i = labels[sx] == i + 1
-        dt_i = dt[sx]
-        im_i = dt_i > 0
-        iters = 0
-        while iters < maxiter:
-            iters += 1
-            peaks_dil = spim.binary_dilation(input=peaks_i, structure=strel)
-            peaks_max = peaks_dil * np.amax(dt_i * peaks_dil)
-            peaks_extended = (peaks_max == dt_i) * im_i
-            if np.all(peaks_extended == peaks_i):
-                new_peaks[sx] += peaks_i
-                break  # Found a true peak
-            elif np.sum(peaks_extended * peaks_i, dtype=np.int64) == 0:
-                break  # Found a saddle point
-            peaks_i = peaks_extended
-        if iters >= maxiter:
-            logger.debug(
-                "Maximum number of iterations reached, consider "
-                + "running again with a larger value of max_iters"
-            )
-    return new_peaks*peaks
+    if N > 0:
+        lin = np.flatnonzero(labels)
+        lab = labels.ravel()[lin] - 1
+        del labels
+        # A cluster entirely in the solid (dt == 0) is always a saddle point,
+        # since the extended peak is restricted to the pore space. Dropping
+        # these clusters up front keeps the kernel buffers, sized for the
+        # largest cluster's box, from spanning e.g. the whole solid matrix
+        # that find_peaks flags as a "peak" where the maximum filter is 0.
+        dt_flat = dt.ravel()
+        in_pore = np.bincount(lab, weights=dt_flat[lin] > 0, minlength=N) > 0
+        keep = in_pore[lab]
+        lin = lin[keep]
+        lab = (np.cumsum(in_pore) - 1)[lab[keep]]
+        n_clusters = int(in_pore.sum())
+        if n_clusters > 0:
+            order = np.argsort(lab, kind="stable")
+            ptr = np.zeros(n_clusters + 1, dtype=np.int64)
+            ptr[1:] = np.cumsum(np.bincount(lab, minlength=n_clusters))
+            crd = np.stack(np.unravel_index(lin[order], dt.shape), axis=1).astype(np.int64)
+            if dt.ndim < 3:
+                crd = np.hstack([np.zeros((len(crd), 3 - dt.ndim), dtype=np.int64), crd])
+            # Linear indices are identical for the 3D view of a 1D or 2D array
+            kept = _nb_trim_saddle(_as_3d(np.ascontiguousarray(dt)), crd, ptr, int(maxiter))
+            new_peaks[kept] = True
+    return new_peaks.reshape(peaks.shape)*peaks
 
 
 def trim_saddle_points_legacy(peaks, dt, maxiter=10):
@@ -1207,6 +1218,38 @@ def _as_3d(arr):
     return arr.reshape((1,) * (3 - arr.ndim) + arr.shape)
 
 
+def _peak_offsets(r_max, ndim):
+    r"""
+    Offsets of the ``find_peaks`` ball footprint, without the center,
+    nearest first and padded to 3D, as used by ``_nb_peaks_in_core``.
+    """
+    strel = ps_round(r=r_max, ndim=ndim)
+    offsets = np.argwhere(strel) - np.array(strel.shape) // 2
+    offsets = offsets[np.any(offsets != 0, axis=1)]
+    offsets = offsets[np.argsort((offsets**2).sum(axis=1), kind="stable")]
+    pad = 3 - ndim
+    return np.hstack([np.zeros((len(offsets), pad), dtype=np.int64),
+                      offsets.astype(np.int64)])
+
+
+def _find_pore_peaks(dt, r_max):
+    r"""
+    ``find_peaks(dt, r_max) & (dt > 0)``: the local maxima of ``dt`` under
+    the ``find_peaks`` ball footprint, restricted to the pore space.
+
+    Solid voxels are left out: ``find_peaks`` flags every solid voxel farther
+    than ``r_max`` from the pores (where the maximum filter is 0), but these
+    are always removed by ``trim_saddle_points``. Each voxel stops at the
+    first larger neighbour, so this is much faster than a full maximum filter.
+    """
+    _check_for_singleton_axes(dt)
+    dt3 = np.ascontiguousarray(_as_3d(dt))
+    c0 = np.zeros(3, dtype=np.int64)
+    c1 = np.array(dt3.shape, dtype=np.int64)
+    peaks = _nb_peaks_in_core(dt3, _peak_offsets(r_max, dt.ndim), c0, c1)
+    return peaks.reshape(dt.shape)
+
+
 def _task_candidate_peaks(src, win, core_in_win, r_max, sigma):
     dt = np.asarray(_open_dt(src)[win])
     ndim = dt.ndim
@@ -1217,13 +1260,8 @@ def _task_candidate_peaks(src, win, core_in_win, r_max, sigma):
         dt_blurred = np.copy(dt)
     # Same footprint as find_peaks; peaks restricted to pore voxels (solid
     # "peaks" are always removed by the saddle trimming anyway)
-    strel = ps_round(r=r_max, ndim=ndim)
-    offsets = np.argwhere(strel) - np.array(strel.shape) // 2
-    offsets = offsets[np.any(offsets != 0, axis=1)]
-    offsets = offsets[np.argsort((offsets**2).sum(axis=1), kind="stable")]
+    offsets = _peak_offsets(r_max, ndim)
     pad = 3 - ndim
-    offsets = np.hstack([np.zeros((len(offsets), pad), dtype=np.int64),
-                         offsets.astype(np.int64)])
     c0 = np.array([0] * pad + [c.start for c in core_in_win], dtype=np.int64)
     c1 = np.array([1] * pad + [c.stop for c in core_in_win], dtype=np.int64)
     peaks = _nb_peaks_in_core(np.ascontiguousarray(_as_3d(dt_blurred)), offsets, c0, c1)

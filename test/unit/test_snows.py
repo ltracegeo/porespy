@@ -1,5 +1,6 @@
 import pytest
 import numpy as np
+import scipy.ndimage as spim
 import porespy as ps
 
 ps.settings.tqdm['disable'] = True
@@ -107,6 +108,68 @@ class SnowsTest:
 
         assert np.all(chunk_with_overlap == expected_img)
         assert np.all(overlaps == expected_overlap)
+
+    def test_trim_saddle_points_matches_dense_reference(self):
+        for ndim, sigma, r_max in [(n, s, r) for n in (2, 3) for s, r in [(0, 2), (0.4, 4), (1.3, 6)]]:
+            im, dt = _random_pores(ndim, seed=ndim)
+            blurred = spim.gaussian_filter(dt, sigma) * im if sigma > 0 else dt
+            peaks = ps.filters.find_peaks(blurred, r_max=r_max)
+            for maxiter in (3, 20):
+                expected = _trim_saddle_points_dense(peaks, dt, maxiter=maxiter)
+                result = ps.filters.trim_saddle_points(peaks, dt, maxiter=maxiter)
+                assert result.dtype == expected.dtype
+                assert np.array_equal(result, expected)
+            labels = spim.label(peaks)[0]
+            assert np.array_equal(ps.filters.trim_saddle_points(labels, dt),
+                                  _trim_saddle_points_dense(labels, dt))
+
+    def test_trim_saddle_points_without_peaks_in_pores(self):
+        dt = np.zeros((10, 10, 10))
+        peaks = np.ones_like(dt, dtype=bool)  # e.g. find_peaks on an all-solid image
+        assert not ps.filters.trim_saddle_points(peaks, dt).any()
+        assert not ps.filters.trim_saddle_points(np.zeros_like(peaks), dt).any()
+
+    def test_find_pore_peaks_matches_find_peaks(self):
+        from porespy.filters._snows import _find_pore_peaks
+
+        for ndim, r_max in [(n, r) for n in (2, 3) for r in (2, 4, 6)]:
+            im, dt = _random_pores(ndim, seed=10 + ndim)
+            expected = ps.filters.find_peaks(dt, r_max=r_max) & im
+            assert np.array_equal(_find_pore_peaks(dt, r_max), expected)
+
+
+def _random_pores(ndim, seed):
+    rng = np.random.default_rng(seed)
+    shape = (200, 200) if ndim == 2 else (60, 70, 50)
+    im = spim.gaussian_filter(rng.random(shape), 2.0)
+    im = im > np.quantile(im, 0.85)  # many unconnected pores
+    return im, edt(im)
+
+
+def _trim_saddle_points_dense(peaks, dt, maxiter=20):
+    # Original per-cluster implementation of trim_saddle_points, kept as reference
+    from skimage.morphology import footprint_rectangle
+    from porespy.tools import extend_slice
+
+    new_peaks = np.zeros_like(peaks, dtype=bool)
+    strel = footprint_rectangle((3,) * dt.ndim)
+    labels, _ = spim.label(peaks > 0)
+    for i, s in enumerate(spim.find_objects(labels)):
+        sx = extend_slice(s, shape=peaks.shape, pad=maxiter)
+        peaks_i = labels[sx] == i + 1
+        dt_i = dt[sx]
+        im_i = dt_i > 0
+        for _ in range(maxiter):
+            peaks_dil = spim.binary_dilation(input=peaks_i, structure=strel)
+            peaks_max = peaks_dil * np.amax(dt_i * peaks_dil)
+            peaks_extended = (peaks_max == dt_i) * im_i
+            if np.all(peaks_extended == peaks_i):
+                new_peaks[sx] += peaks_i
+                break
+            elif np.sum(peaks_extended * peaks_i, dtype=np.int64) == 0:
+                break
+            peaks_i = peaks_extended
+    return new_peaks * peaks
 
 
 if __name__ == '__main__':
